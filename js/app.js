@@ -5,6 +5,7 @@ import { bars, stack, rose, lines } from './charts.js';
 import { MapView, SPEED_STOPS } from './mapview.js';
 import { fetchWays, matchDay } from './osm.js';
 import { dayCard } from './share.js';
+import { createLive } from './live.js';
 
 const $ = (s, r = document) => r.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -28,7 +29,7 @@ const mv = new MapView($('#map'), { onResort: key => { location.hash = '#/r/' + 
 window.__traza = { S, mv };
 
 function toast(msg, ms = 3800) { const t = $('#toast'); t.textContent = msg; t.hidden = false; clearTimeout(toast.h); toast.h = setTimeout(() => t.hidden = true, ms); }
-function refresh() { S.days.sort((a, b) => b.start - a.start); S.A = aggregate(S.days); }
+function refresh() { S.days.sort((a, b) => b.start - a.start); S.A = aggregate(S.days); }   // rehace también los carteles del globo
 const liftName = (id, A = S.A) => S.liftNames[id] || (() => { const ids = [...A.lifts.values()].sort((a, b) => b.count - a.count).map(l => l.id); return 'Remonte ' + String.fromCharCode(65 + (ids.indexOf(id) % 26)); })();
 
 /* ---------- importación ---------- */
@@ -104,6 +105,17 @@ const dayRow = d => `<a class="row" href="#/d/${encodeURIComponent(d.id)}"><span
   <span class="what"><b>${esc(d.resort)}</b><i>${d.runCount} bajadas, ${f.km(d.distance)} km, ${f.int(d.vertical)} m</i></span><span class="num">${Math.round(d.topSpeed * KMH)}<small>km/h</small></span></a>`;
 const speedLegend = () => `<div class="speedlegend"><span>0</span><i style="background:linear-gradient(90deg,${SPEED_STOPS.map(([v, c]) => `${c} ${v / 75 * 100}%`).join(',')})"></i><span>75+ km/h</span></div>`;
 
+// Silueta de las bajadas de una estación, para su cartel en el globo.
+function miniTrace(days) {
+  const W = 58, H = 40, runs = []; let a0 = 90, a1 = -90, o0 = 180, o1 = -180;
+  for (const d of days.slice(0, 4)) { const T = d.track; for (const a of d.actions) if (a.type === 'run') { const pts = []; for (let i = a.i0; i <= a.i1; i += 6) { pts.push(i); a0 = Math.min(a0, T.lat[i]); a1 = Math.max(a1, T.lat[i]); o0 = Math.min(o0, T.lon[i]); o1 = Math.max(o1, T.lon[i]); } runs.push([T, pts]); } }
+  if (!runs.length) return '';
+  const kx = Math.cos((a0 + a1) / 2 * Math.PI / 180), sc = Math.min((W - 6) / ((o1 - o0) * kx || 1), (H - 6) / ((a1 - a0) || 1)), ox = (W - (o1 - o0) * kx * sc) / 2, oy = (H - (a1 - a0) * sc) / 2;
+  const path = runs.map(([T, pts]) => pts.map((i, k) => `${k ? 'L' : 'M'}${(ox + (T.lon[i] - o0) * kx * sc).toFixed(1)} ${(oy + (a1 - T.lat[i]) * sc).toFixed(1)}`).join('')).join('');
+  return `<svg class="mini" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" aria-hidden="true"><path d="${path}" fill="none" stroke="#D7263D" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" stroke-opacity=".8"/></svg>`;
+}
+const globeResorts = () => [...S.A.resorts.values()].map(r => { r.mini ||= miniTrace(r.days); return r; });
+
 /* ---------- vistas ---------- */
 function viewHome() {
   const A = S.A;
@@ -125,12 +137,21 @@ function viewHome() {
       <span class="what"><b>${esc(r.name)}</b><i>${f.km(r.dist)} km, ${f.int(r.vert)} m, cota ${f.int(r.peak)} m</i></span><span class="go">Entrar en 3D</span></a>`).join('')}</div>
     <h2>Últimos días</h2><div class="list">${S.days.slice(0, 6).map(dayRow).join('')}</div>
     ${S.days.length > 6 ? `<p><a href="#/add">Ver los ${S.days.length} días guardados</a></p>` : ''}`;
-  mv.showGlobe(resorts);
+  if (!S.keepMap) mv.showGlobe(globeResorts());
 }
 
 function liftRows(lifts) {
   return `<div class="list">${lifts.map(l => `<div class="row"><span class="disc lift">${l.count}</span>
     <span class="what"><input class="rename" data-lift="${esc(l.id)}" value="${esc(liftName(l.id))}" aria-label="Nombre del remonte"><i>${l.count} ${l.count === 1 ? 'subida' : 'subidas'}, ${f.int(l.vert)} m subidos, ${f.dur(l.time)} sentado</i></span></div>`).join('')}</div>`;
+}
+
+function pistesHtml(days) {
+  const g = new Map();
+  for (const d of days) { const nm = S.runNames[d.id] || {}; for (const r of dayStats(d).runs) { const x = nm[r.n]; if (!x?.name) continue;
+    const p = g.get(x.name) || { name: x.name, diff: x.diff, n: 0, top: 0, best: null, days: new Set() }; p.n++; p.days.add(d.id); if (r.top > p.top) { p.top = r.top; p.best = d; } g.set(x.name, p); } }
+  const list = [...g.values()].sort((a, b) => b.n - a.n).slice(0, 12);
+  return list.length ? `<h2>Tus pistas</h2><div class="list">${list.map(p => `<a class="row" href="#/d/${encodeURIComponent(p.best.id)}"><span class="disc" style="background:${(DIFF[p.diff] || DIFF.easy)[0]}">${p.n}</span>
+    <span class="what"><b>${esc(p.name)}</b><i>${p.n} ${p.n === 1 ? 'vez' : 'veces'} en ${p.days.size} ${p.days.size === 1 ? 'día' : 'días'}, mejor marca el ${f.dateShort(p.best)}</i></span><span class="num">${Math.round(p.top * KMH)}<small>km/h</small></span></a>`).join('')}</div>` : '';
 }
 
 function viewResort(key) {
@@ -141,6 +162,7 @@ function viewResort(key) {
     <p class="lead">${r.days.length} ${r.days.length === 1 ? 'día esquiado' : 'días esquiados'}. En rojo, todas tus bajadas superpuestas: cuanto más intenso, más veces has pasado.</p>
     <div class="stats">${stat(f.km(r.dist), 'km')}${stat(f.int(r.vert), 'm de desnivel')}${stat(r.runs, 'bajadas')}${stat(Math.round(r.top * KMH), 'km/h de máxima', 'hot')}${stat(f.int(r.peak), 'm cota máxima')}${stat(f.dur(A.liftTime), 'en remontes')}</div>
     <h2>Días aquí</h2><div class="list">${r.days.map(dayRow).join('')}</div>
+    ${pistesHtml(r.days)}
     ${lifts.length ? `<h2>Remontes que usas</h2><p class="note">Los nombres se buscan solos en OpenStreetMap. Si alguno no aparece o está mal, escríbelo tú.</p>${liftRows(lifts)}` : ''}
     <h2>Hacia dónde bajas</h2><div class="split">${rose(A.rose)}<p class="note">Orientación de tus bajadas, por metros recorridos. Las laderas norte guardan mejor la nieve.</p></div>`;
   if (!S.keepMap) mv.showResort(r.days);
@@ -170,7 +192,7 @@ function viewDay(id) {
         <select id="rate" aria-label="Velocidad de la repetición"><option value="30">×30</option><option value="60" selected>×60</option><option value="150">×150</option><option value="400">×400</option></select></div>
       <canvas id="profile" height="110" aria-hidden="true"></canvas>
       <input id="scrub" type="range" min="${Math.floor(d.start)}" max="${Math.ceil(d.end)}" value="${Math.floor(d.start)}" step="1" aria-label="Momento del día">
-      <div class="rp-opts"><label><input type="checkbox" id="follow" checked> Seguir con la cámara</label><label><input type="checkbox" id="skip" checked> Saltar las esperas</label></div>
+      <div class="rp-opts"><label><input type="checkbox" id="follow" checked> Seguir con la cámara</label><label><input type="checkbox" id="skip" checked> Saltar las esperas</label><label><input type="checkbox" id="orbit"> Girar la cámara</label></div>
     </section>
     <div class="stats">${stat(f.km(d.distance), 'km')}${stat(f.int(d.vertical), 'm de desnivel')}${stat(d.runCount, 'bajadas')}${stat(f.kmh(d.topSpeed), 'km/h de máxima', 'hot')}${stat(f.int(d.peakAlt), 'm cota máxima')}${stat(f.dur(s.total), 'en pistas')}</div>
     ${speedLegend()}
@@ -225,7 +247,7 @@ function viewStats() {
     <h2>Qué días de la semana esquías</h2>${bars(['L', 'M', 'X', 'J', 'V', 'S', 'D'].map((l, i) => ({ label: l, value: A.weekdays[i] })), { unit: 'días', height: 80 })}
     ${top.length ? `<h2>Tus remontes de siempre</h2><div class="list">${top.map(l => `<div class="row"><span class="disc lift">${l.count}</span><span class="what"><b>${esc(liftName(l.id))}</b><i>${esc(l.resort)}, ${f.int(l.vert)} m subidos, ${f.dur(l.time)} sentado</i></span></div>`).join('')}</div>` : ''}
     <h2>Hacia dónde bajas</h2><div class="split">${rose(A.rose)}<p class="note">Orientación de todas tus bajadas, por metros recorridos.</p></div>`;
-  if (!mv.mode.startsWith('globe')) mv.showGlobe([...A.resorts.values()]);
+  if (!mv.mode.startsWith('globe')) mv.showGlobe(globeResorts());
 }
 
 function viewAdd() {
@@ -238,7 +260,7 @@ function viewAdd() {
       <div class="actions"><button class="btn" data-act="backup">Descargar copia de seguridad (.zip)</button></div>
       <p class="note">La copia lleva los .slopes originales. Para restaurarla en otro dispositivo, añade ese .zip aquí.</p>` : '<p class="note">Todavía no hay ninguno.</p>'}
     <p class="note">Los datos viven solo en el navegador de este dispositivo. Si borras los datos del sitio, se pierden: guarda una copia de vez en cuando.</p>`;
-  if (!mv.mode.startsWith('globe')) mv.showGlobe([...S.A.resorts.values()]);
+  if (!mv.mode.startsWith('globe')) mv.showGlobe(globeResorts());
 }
 
 /* ---------- repetición del día ---------- */
@@ -252,7 +274,8 @@ const replay = {
     cv.onpointerup = cv.onpointercancel = () => { cv.onpointermove = null; };
     $('#scrub').oninput = e => this.set(+e.target.value, true);
     $('#follow').onchange = e => { mv.follow = e.target.checked; };
-    mv.follow = true;
+    $('#orbit').onchange = e => { mv.orbit = e.target.checked; };
+    mv.follow = true; mv.orbit = false;
   },
   detach() { this.stop(); this.d = null; $('#hud').hidden = true; },
   drawBase() {
@@ -280,6 +303,7 @@ const replay = {
     const L = (arr) => arr[i] + (arr[j] - arr[i]) * k, lat = L(T.lat), lon = L(T.lon), alt = L(T.alt), v = L(T.spd) * KMH;
     const act = d.actions.find(a => t >= a.t0 && t <= a.t1);
     mv.setCursor(lat, lon, this.playing || user);
+    if (act && (this.playing || user)) { const c = []; for (let q = act.i0; q <= i; q++) c.push([T.lon[q], T.lat[q]]); c.push([lon, lat]); mv.setTrail(c); } else if (!act) mv.setTrail(null);
     const hm = f.hm(t, d.tz);
     $('#hud-time').textContent = hm; $('#hud-speed b').textContent = Math.round(act ? v : 0); $('#hud-alt b').textContent = f.int(alt);
     const rt = $('#rp-time'); if (rt) { rt.textContent = hm; $('#rp-what').textContent = act ? (act.type === 'run' ? `Bajada ${act.n} · ${Math.round(v)} km/h · ${f.int(alt)} m` : `${liftName(act.liftId)} · ${f.int(alt)} m`) : `Parado · ${f.int(alt)} m`; $('#scrub').value = Math.round(t); }
@@ -310,7 +334,9 @@ async function act(name, el) {
   const [cmd, ...rest] = name.split(':'), arg = rest.join(':');
   if (cmd === 'pick') $('#file').click();
   else if (cmd === 'play') replay.toggle();
-  else if (cmd === 'run') { const d = replay.d, r = d && dayStats(d).runs.find(x => x.n === +arg); if (!r) return; replay.stop(); mv.highlight(r.n); mv.fitAction(d, r); replay.set(r.t0, false); if (innerWidth < 900) { sheet.set('half'); body.scrollTo({ top: 0 }); } }
+  else if (cmd === 'live-start') live.start();
+  else if (cmd === 'live-stop') live.stop();
+  else if (cmd === 'run') { const d = replay.d, r = d && dayStats(d).runs.find(x => x.n === +arg); if (!r) return; replay.stop(); mv.setTrail(null); mv.highlight(r.n); mv.fitAction(d, r); replay.set(r.t0, false); if (innerWidth < 900) { sheet.set('half'); body.scrollTo({ top: 0 }); } }
   else if (cmd === 'del') {
     if (el.dataset.sure) { await db.delDay(arg); S.days = S.days.filter(d => d.id !== arg); refresh(); toast('Día eliminado'); if (location.hash.startsWith('#/d/')) location.hash = '#/'; else route(); }
     else { el.dataset.sure = '1'; el.textContent = 'Pulsa otra vez para eliminar'; setTimeout(() => { if (el.isConnected) { delete el.dataset.sure; el.textContent = el.classList.contains('small') ? 'Eliminar' : 'Eliminar este día'; } }, 4000); }
@@ -356,15 +382,17 @@ const sheet = {
 };
 sheet.init();
 
+const live = createLive({ S, mv, f, db, toast, esc, stat });
+
 /* ---------- rutas y arranque ---------- */
 function route(keep) {
   const h = location.hash.replace(/^#\/?/, ''), [p, arg] = h.split('/'), key = arg ? decodeURIComponent(arg) : '';
-  const view = p === 'r' ? 'resort' : p === 'd' ? 'day' : p === 'stats' ? 'stats' : p === 'add' ? 'add' : 'home';
+  const view = p === 'r' ? 'resort' : p === 'd' ? 'day' : p === 'stats' ? 'stats' : p === 'add' ? 'add' : p === 'live' ? 'live' : 'home';
   if (keep !== true && document.body.dataset.view !== view) sheet.set(view === 'stats' || view === 'add' ? 'full' : 'half', true);
-  document.body.dataset.view = view; if (view !== 'day') replay.detach();
+  document.body.dataset.view = view; if (view !== 'day') replay.detach(); if (view !== 'live') live.leave();
   document.querySelectorAll('#tabs [data-tab]').forEach(a => a.classList.toggle('on', a.dataset.tab === (view === 'resort' || view === 'day' ? 'home' : view)));
   mv.pad();
-  ({ home: viewHome, stats: viewStats, add: viewAdd, resort: () => viewResort(key), day: () => viewDay(key) })[view]();
+  ({ home: viewHome, stats: viewStats, add: viewAdd, live: () => live.view(keep === true || live.active()), resort: () => viewResort(key), day: () => viewDay(key) })[view]();
   if (keep !== true) body.scrollTop = 0;
 }
 addEventListener('hashchange', () => route());

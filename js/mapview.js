@@ -17,7 +17,7 @@ const STYLE = {
     dem: DEM, dem2: DEM,
   },
   layers: [
-    { id: 'bg', type: 'background', paint: { 'background-color': '#16324F' } },
+    { id: 'bg', type: 'background', paint: { 'background-color': '#1B3F63' } },
     { id: 'sat', type: 'raster', source: 'sat' },
     { id: 'topo', type: 'raster', source: 'topo', layout: { visibility: 'none' } },
     { id: 'hill', type: 'hillshade', source: 'dem2', minzoom: 7, paint: { 'hillshade-exaggeration': 0.45, 'hillshade-shadow-color': '#10243B', 'hillshade-highlight-color': '#FFFFFF' } },
@@ -27,7 +27,8 @@ const STYLE = {
     'atmosphere-blend': ['interpolate', ['linear'], ['zoom'], 0, 1, 5, 0.8, 9, 0] },
 };
 const BASES = {
-  nieve: { layer: 'sat', paint: { 'raster-saturation': -0.8, 'raster-brightness-min': 0.42, 'raster-contrast': 0.15 } },
+  // de lejos, la Tierra con su color; al acercarse a la montaña, aspecto nevado
+  nieve: { layer: 'sat', paint: { 'raster-saturation': ['interpolate', ['linear'], ['zoom'], 6, 0, 10, -0.8], 'raster-brightness-min': ['interpolate', ['linear'], ['zoom'], 6, 0, 10, 0.42], 'raster-contrast': ['interpolate', ['linear'], ['zoom'], 6, 0, 10, 0.15] } },
   sat: { layer: 'sat', paint: { 'raster-saturation': 0, 'raster-brightness-min': 0, 'raster-contrast': 0 } },
   topo: { layer: 'topo', paint: {} },
 };
@@ -42,12 +43,15 @@ export class MapView {
     map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'bottom-right');
     map.on('error', () => {});                          // una tesela que falla no debe romper nada
     this.ready = new Promise(res => map.on('load', () => {
-      for (const id of ['heat', 'lifts', 'runs']) map.addSource(id, { type: 'geojson', data: FC() });
+      for (const id of ['heat', 'lifts', 'runs', 'trail', 'resorts']) map.addSource(id, { type: 'geojson', data: FC() });
       map.addLayer({ id: 'heat', type: 'line', source: 'heat', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#D7263D', 'line-opacity': 0.34, 'line-width': ['interpolate', ['linear'], ['zoom'], 11, 1.5, 15, 4] } });
       map.addLayer({ id: 'lifts', type: 'line', source: 'lifts', paint: { 'line-color': '#F2B705', 'line-width': 2.2, 'line-dasharray': [2, 1.5] } });
       map.addLayer({ id: 'hl', type: 'line', source: 'runs', filter: ['==', ['get', 'n'], -1], layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#FFFFFF', 'line-width': 12, 'line-opacity': 0.95 } });
       map.addLayer({ id: 'runs-case', type: 'line', source: 'runs', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#0F2740', 'line-width': 6.5, 'line-opacity': 0.55 } });
       map.addLayer({ id: 'runs', type: 'line', source: 'runs', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': ['interpolate', ['linear'], ['get', 'v'], ...SPEED_STOPS.flat()], 'line-width': 4 } });
+      map.addLayer({ id: 'trail', type: 'line', source: 'trail', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#FFFFFF', 'line-width': 5, 'line-opacity': 0.95 } });
+      map.addLayer({ id: 'resort-halo', type: 'circle', source: 'resorts', maxzoom: 9, paint: { 'circle-color': '#D7263D', 'circle-opacity': 0.22, 'circle-blur': 0.6, 'circle-radius': ['interpolate', ['linear'], ['get', 'days'], 1, 16, 20, 34] } });
+      map.addLayer({ id: 'resort-dot', type: 'circle', source: 'resorts', maxzoom: 9, paint: { 'circle-color': '#D7263D', 'circle-radius': 5.5, 'circle-stroke-color': '#FFFFFF', 'circle-stroke-width': 2.5 } });
       this.setBase('nieve'); res();
     }));
     const stop = () => { this.spinning = false; };
@@ -71,7 +75,8 @@ export class MapView {
     for (const [k, v] of Object.entries(b.paint)) m.setPaintProperty('sat', k, v);
   }
   setPistes(on) { this.map.setLayoutProperty('pistes', 'visibility', on ? 'visible' : 'none'); }
-  clear() { for (const id of ['heat', 'lifts', 'runs']) this.map.getSource(id).setData(FC()); this.cursor.remove(); this.highlight(-1); }
+  clear() { for (const id of ['heat', 'lifts', 'runs', 'trail', 'resorts']) this.map.getSource(id).setData(FC()); this.cursor.remove(); this.highlight(-1); }
+  setTrail(coords) { const src = this.map.getSource('trail'); if (src) src.setData(FC(coords && coords.length > 1 ? [{ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: coords } }] : [])); }
   clearPins() { this.pins.forEach(p => p.remove()); this.pins = []; }
 
   /** resorts: [{key, name, lat, lon, days:[]}] */
@@ -80,16 +85,18 @@ export class MapView {
     const m = this.map; m.setTerrain(null);
     for (const r of resorts) {
       const b = document.createElement('button'); b.className = 'pin'; b.type = 'button';
-      b.innerHTML = `<b></b><i>${r.days.length} ${r.days.length === 1 ? 'día' : 'días'}</i>`; b.firstChild.textContent = r.name;
+      b.innerHTML = `${r.mini || ''}<span><b></b><i>${r.days.length} ${r.days.length === 1 ? 'día' : 'días'}, cota ${String(Math.round(r.peak)).replace(/\B(?=(\d{3})+(?!\d))/g, '.')} m</i></span>`; b.querySelector('b').textContent = r.name;
+      b.setAttribute('aria-label', `Entrar en ${r.name}`);
       b.addEventListener('click', () => this.onResort(r.key));
-      this.pins.push(new maplibregl.Marker({ element: b, anchor: 'bottom' }).setLngLat([r.lon, r.lat]).addTo(m));
+      this.pins.push(new maplibregl.Marker({ element: b, anchor: 'bottom', offset: [0, -10] }).setLngLat([r.lon, r.lat]).addTo(m));
     }
+    this.map.getSource('resorts').setData(FC(resorts.map(r => ({ type: 'Feature', properties: { days: r.days.length }, geometry: { type: 'Point', coordinates: [r.lon, r.lat] } }))));
     if (resorts.length > 1) {
       const bb = new maplibregl.LngLatBounds(); resorts.forEach(r => bb.extend([r.lon, r.lat]));
       m.fitBounds(bb, { padding: 90, maxZoom: 4.2, pitch: 0, bearing: 0, duration: reduced ? 0 : 2200 });
     } else {
       const c = resorts[0] ? [resorts[0].lon, resorts[0].lat - 4] : [1.5, 30];
-      m.flyTo({ center: c, zoom: resorts[0] ? 2.7 : 1.5, pitch: 0, bearing: 0, duration: reduced ? 0 : 2200 });
+      m.flyTo({ center: c, zoom: resorts[0] ? (innerWidth >= 900 ? 2.2 : 1.7) : 1.5, pitch: 0, bearing: 0, duration: reduced ? 0 : 2200 });
     }
     if (!resorts.length && !reduced) this.spin();
   }
@@ -112,8 +119,8 @@ export class MapView {
   }
   _terrain() { try { this.map.setTerrain({ source: 'dem', exaggeration: 1.25 }); } catch { /* sin relieve */ } }
 
-  async showResort(days) {
-    await this.ready; this.mode = 'resort'; this.spinning = false; this.clear(); this.clearPins(); this.pad(); this._terrain();
+  async showResort(days, opts = {}) {
+    await this.ready; this.mode = opts.mode || 'resort'; this.spinning = false; this.clear(); this.clearPins(); this.pad(); this._terrain();
     const feats = [], lifts = new Map();
     for (const d of days) { const T = d.track; for (const a of d.actions) {
       const coords = []; for (let i = a.i0; i <= a.i1; i += 2) coords.push([T.lon[i], T.lat[i]]);
@@ -122,8 +129,15 @@ export class MapView {
       else if (!lifts.has(a.liftId || a.t0)) lifts.set(a.liftId || a.t0, { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: coords } });
     } }
     this.map.getSource('heat').setData(FC(feats)); this.map.getSource('lifts').setData(FC([...lifts.values()]));
-    this._frame(days);
+    if (!opts.noFrame) this._frame(days);
   }
+  /** Posición en directo: la primera vez vuela hasta ti; después te sigue. */
+  async liveFix(lat, lon) {
+    await this.ready; this.cursor.setLngLat([lon, lat]); if (!this.cursor._map) this.cursor.addTo(this.map);
+    if (!this._liveFlown) { this._liveFlown = true; this._terrain(); this.map.flyTo({ center: [lon, lat], zoom: 14.6, pitch: 60, duration: reduced ? 0 : 2500 }); this._liveT = performance.now() + 2600; }
+    else if (this.follow && performance.now() > this._liveT) this.map.easeTo({ center: [lon, lat], duration: 900, easing: t => t });
+  }
+  liveEnd() { this._liveFlown = false; this.cursor.remove(); }
 
   async showDay(d) {
     await this.ready; const again = this.mode === 'day:' + d.id; this.mode = 'day:' + d.id; this.spinning = false;
@@ -147,6 +161,6 @@ export class MapView {
   }
   setCursor(lat, lon, moving) {
     this.cursor.setLngLat([lon, lat]); if (!this.cursor._map) this.cursor.addTo(this.map);
-    if (moving && this.follow) this.map.jumpTo({ center: [lon, lat] });
+    if (moving && this.follow) this.map.jumpTo(this.orbit && !reduced ? { center: [lon, lat], bearing: this.map.getBearing() + 0.12 } : { center: [lon, lat] });
   }
 }

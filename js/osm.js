@@ -28,7 +28,15 @@ function segDist(la, lo, a, b) {
   const L = bx * bx + by * by, t = L ? Math.max(0, Math.min(1, (px * bx + py * by) / L)) : 0;
   return Math.hypot(px - t * bx, py - t * by);
 }
-function nearest(la, lo, ways, maxM) {
+export function prep(ways) {
+  const pad = 0.0006;
+  for (const w of ways) if (!w.box) {
+    const la = w.pts.map(p => p[0]), lo = w.pts.map(p => p[1]);
+    w.box = [Math.min(...la) - pad, Math.min(...lo) - pad, Math.max(...la) + pad, Math.max(...lo) + pad];
+  }
+  return ways;
+}
+export function nearest(la, lo, ways, maxM) {
   let best = null, bd = maxM;
   for (const w of ways) {
     if (la < w.box[0] || la > w.box[2] || lo < w.box[1] || lo > w.box[3]) continue;
@@ -39,11 +47,7 @@ function nearest(la, lo, ways, maxM) {
 
 /** Devuelve { runs: {n: {name, diff}}, lifts: {liftId: name} } */
 export function matchDay(day, ways) {
-  const pad = 0.0006;
-  for (const w of ways) if (!w.box) {
-    const la = w.pts.map(p => p[0]), lo = w.pts.map(p => p[1]);
-    w.box = [Math.min(...la) - pad, Math.min(...lo) - pad, Math.max(...la) + pad, Math.max(...lo) + pad];
-  }
+  prep(ways);
   const pistes = ways.filter(w => !w.lift), aerial = ways.filter(w => w.lift && w.name);
   const T = day.track, out = { runs: {}, lifts: {} };
   for (const a of day.actions) {
