@@ -43,7 +43,7 @@ export class MapView {
     map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'bottom-right');
     map.on('error', () => {});                          // una tesela que falla no debe romper nada
     this.ready = new Promise(res => map.on('load', () => {
-      for (const id of ['heat', 'lifts', 'runs', 'trail', 'speed', 'seg']) map.addSource(id, { type: 'geojson', data: FC() });
+      for (const id of ['heat', 'lifts', 'runs', 'trail', 'speed', 'seg', 'cover', 'cmp']) map.addSource(id, { type: 'geojson', data: FC() });
       map.addLayer({ id: 'heat', type: 'line', source: 'heat', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#D7263D', 'line-opacity': 0.34, 'line-width': ['interpolate', ['linear'], ['zoom'], 11, 1.5, 15, 4] } });
       map.addLayer({ id: 'lifts', type: 'line', source: 'lifts', paint: { 'line-color': '#F2B705', 'line-width': 2.2, 'line-dasharray': [2, 1.5] } });
       map.addLayer({ id: 'hl', type: 'line', source: 'runs', filter: ['==', ['get', 'n'], -1], layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#FFFFFF', 'line-width': 12, 'line-opacity': 0.95 } });
@@ -52,6 +52,10 @@ export class MapView {
       map.addLayer({ id: 'speed', type: 'circle', source: 'speed', paint: {
         'circle-color': ['interpolate', ['linear'], ['get', 'v'], ...SPEED_STOPS.flat()],
         'circle-radius': ['interpolate', ['exponential', 2], ['zoom'], 12, 1.6, 15, 6, 17, 22], 'circle-opacity': 0.85, 'circle-blur': 0.35 } }, 'lifts');
+      map.addLayer({ id: 'cover-todo', type: 'line', source: 'cover', filter: ['!', ['get', 'done']], layout: { 'line-cap': 'round' }, paint: { 'line-color': '#7D8FA3', 'line-width': 2.6, 'line-dasharray': [1.2, 1.6] } }, 'lifts');
+      map.addLayer({ id: 'cover-done', type: 'line', source: 'cover', filter: ['get', 'done'], layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': ['get', 'color'], 'line-width': 4.5 } }, 'lifts');
+      map.addLayer({ id: 'cmp-case', type: 'line', source: 'cmp', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#FFFFFF', 'line-width': 7, 'line-opacity': 0.8 } });
+      map.addLayer({ id: 'cmp', type: 'line', source: 'cmp', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': ['get', 'color'], 'line-width': 3.6, 'line-opacity': ['case', ['get', 'hl'], 1, 0.85] } });
       map.addLayer({ id: 'seg-case', type: 'line', source: 'seg', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#0F2740', 'line-width': 11 } });
       map.addLayer({ id: 'seg', type: 'line', source: 'seg', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#FFFFFF', 'line-width': 6 } });
       map.addLayer({ id: 'trail', type: 'line', source: 'trail', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#FFFFFF', 'line-width': 5, 'line-opacity': 0.95 } });
@@ -79,11 +83,28 @@ export class MapView {
     for (const [k, v] of Object.entries(b.paint)) m.setPaintProperty('sat', k, v);
   }
   setPistes(on) { this.map.setLayoutProperty('pistes', 'visibility', on ? 'visible' : 'none'); }
-  clear() { this.ghost?.remove(); for (const id of ['heat', 'lifts', 'runs', 'trail', 'speed', 'seg']) this.map.getSource(id).setData(FC()); this.cursor.remove(); this.highlight(-1); }
+  clear() { this.ghost?.remove(); for (const id of ['heat', 'lifts', 'runs', 'trail', 'speed', 'seg', 'cover', 'cmp']) this.map.getSource(id).setData(FC()); this.cursor.remove(); this.highlight(-1); }
   /** 'pasadas' = mapa de calor de por dónde pasas; 'velocidad' = media de velocidad por zona. */
   setHeat(mode, cells) {
     this.map.setLayoutProperty('heat', 'visibility', mode === 'velocidad' ? 'none' : 'visible');
     this.map.getSource('speed').setData(FC(mode === 'velocidad' ? cells : []));
+  }
+  /** Cobertura: pistas bajadas en su color y las que faltan en gris discontinuo. */
+  setCover(pistes, colors) {
+    const on = !!pistes;
+    this.map.setLayoutProperty('heat', 'visibility', on ? 'none' : 'visible');
+    this.map.getSource('cover').setData(FC((pistes || []).map(p => ({ type: 'Feature', properties: { done: p.done, color: colors(p.diff) }, geometry: { type: 'LineString', coordinates: p.pts.map(([la, lo]) => [lo, la]) } }))));
+  }
+  /** Dos días a la vez, cada uno de un color. */
+  async showCompare(a, b, colors) {
+    await this.ready; this.mode = 'cmp'; this.spinning = false; this.clear(); this.clearPins(); this.pad(); this._terrain();
+    const feats = [];
+    [a, b].forEach((d, k) => { const T = d.track; for (const r of d.actions) if (r.type === 'run') {
+      const c = []; for (let i = r.i0; i <= r.i1; i += 2) c.push([T.lon[i], T.lat[i]]);
+      if (c.length > 1) feats.push({ type: 'Feature', properties: { color: colors[k], hl: false }, geometry: { type: 'LineString', coordinates: c } });
+    } });
+    this.map.getSource('cmp').setData(FC(feats));
+    this._frame([a, b]);
   }
   setSegment(coords, fit) {
     this.map.getSource('seg').setData(FC(coords && coords.length > 1 ? [{ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: coords } }] : []));

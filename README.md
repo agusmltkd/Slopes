@@ -10,6 +10,10 @@ PWA para ver el historial de esquí a partir de los ficheros `.slopes` que expor
 - Mapa de velocidad: en cada estación, dónde vas lanzado y dónde frenas.
 - Vídeo de temporada: resumen animado vertical de unos 20 segundos para compartir.
 - En vivo: tu posición sobre la estación, parte de nieve, cuenta atrás del viaje y avisos de nieve por Telegram (ver `worker/`).
+- Retos de temporada con su progreso, que avisan al importar días.
+- Comparar dos días cara a cara, con las dos trazas en el mapa y las bajadas repetidas enfrentadas.
+- Curvas y pendiente: giros estimados por GPS y velocidad según la pendiente.
+- Cobertura: qué pistas de la estación has bajado y cuáles te faltan, según OpenStreetMap.
 - Los datos se guardan solo en el dispositivo (IndexedDB). «Añadir días» permite descargar una copia `.zip` y restaurarla.
 
 Sin compilación: HTML, CSS y JS tal cual. MapLibre GL y fflate van incluidos en `vendor/`.

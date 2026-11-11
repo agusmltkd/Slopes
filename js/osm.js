@@ -2,25 +2,35 @@
 import { hav } from './stats.js';
 const ENDPOINTS = ['https://overpass-api.de/api/interpreter', 'https://overpass.kumi.systems/api/interpreter'];
 
-export async function fetchWays(bbox) {
-  const [s, w, n, e] = bbox.map(v => v.toFixed(5));
-  const q = `[out:json][timeout:25];(way["piste:type"="downhill"](${s},${w},${n},${e});way["aerialway"](${s},${w},${n},${e}););out tags geom;`;
+const PARSE = el => ({
+  id: el.id, lift: !!el.tags?.aerialway,
+  name: el.tags?.name || el.tags?.['piste:name'] || el.tags?.ref || el.tags?.['piste:ref'] || '',
+  diff: el.tags?.['piste:difficulty'] || '', pts: el.geometry.map(g => [g.lat, g.lon]),
+});
+/** Todas las pistas de la estación: primero por el recinto de esquí de OSM que contiene el punto; si no hay, por un recuadro amplio. */
+export async function fetchResortWays(lat, lon, bbox) {
+  const area = `[out:json][timeout:30];is_in(${lat.toFixed(5)},${lon.toFixed(5)})->.a;area.a["landuse"="winter_sports"]->.r;(way(area.r)["piste:type"="downhill"];way(area.r)["aerialway"];);out tags geom;`;
+  try { const w = await overpass(area); if (w.filter(x => !x.lift).length >= 5) return w; } catch { /* se prueba el recuadro */ }
+  return fetchWays(bbox);
+}
+async function overpass(q) {
   let err;
   for (const url of ENDPOINTS) {
     try {
       const r = await fetch(url, { method: 'POST', body: 'data=' + encodeURIComponent(q), headers: { 'Content-Type': 'application/x-www-form-urlencoded' } });
       if (!r.ok) throw new Error('HTTP ' + r.status);
       const j = await r.json();
-      return (j.elements || []).filter(el => el.geometry && el.geometry.length > 1).map(el => ({
-        id: el.id, lift: !!el.tags?.aerialway,
-        name: el.tags?.name || el.tags?.['piste:name'] || el.tags?.ref || el.tags?.['piste:ref'] || '',
-        diff: el.tags?.['piste:difficulty'] || '', pts: el.geometry.map(g => [g.lat, g.lon]),
-      }));
+      return (j.elements || []).filter(el => el.geometry && el.geometry.length > 1).map(PARSE);
     } catch (e2) { err = e2; }
   }
   throw err || new Error('Sin respuesta de OpenStreetMap');
 }
 
+export async function fetchWays(bbox) {
+  const [s, w, n, e] = bbox.map(v => v.toFixed(5));
+  const q = `[out:json][timeout:25];(way["piste:type"="downhill"](${s},${w},${n},${e});way["aerialway"](${s},${w},${n},${e}););out tags geom;`;
+  return overpass(q);
+}
 // Distancia de un punto a un segmento, en metros (aproximación plana, de sobra a esta escala).
 function segDist(la, lo, a, b) {
   const kx = 111320 * Math.cos(la * Math.PI / 180), ky = 110540;
