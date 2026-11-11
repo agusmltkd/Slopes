@@ -28,6 +28,7 @@ button,input,select{font:inherit;color:inherit}
 #tabs a{padding:15px 10px 12px;text-decoration:none;color:var(--ink2);font-weight:500;border-bottom:3px solid transparent;white-space:nowrap}
 #tabs a.on{color:var(--ink);border-bottom-color:var(--red)}
 #tabs .brand{display:flex;align-items:center;gap:7px;margin-right:auto;color:var(--ink);font:700 24px/1 var(--cond);letter-spacing:.01em;padding-left:6px}
+#grip{display:none}
 #body{flex:1;overflow-y:auto;overscroll-behavior:contain;padding:20px 20px 40px;outline:none}
 
 .hero{font:700 44px/1 var(--cond);letter-spacing:-.005em;margin:6px 0 10px;text-wrap:balance}
@@ -63,7 +64,7 @@ div.row{cursor:default}
 /* disco numerado, como las balizas de pista */
 .disc{flex:none;width:34px;height:34px;border-radius:50%;display:grid;place-items:center;color:#fff;font:700 17px/1 var(--cond);box-shadow:inset 0 0 0 2px rgba(255,255,255,.9),0 0 0 1px rgba(15,39,64,.25)}
 .disc.lift{background:var(--sun);color:var(--ink);border-radius:8px}
-.rename{width:100%;border:0;border-bottom:1px dashed var(--mist);background:none;font-weight:600;padding:1px 0}
+.rename{width:100%;font-size:16px;border:0;border-bottom:1px dashed var(--mist);background:none;font-weight:600;padding:1px 0}
 .rename:focus{outline:none;border-bottom:2px solid var(--blue)}
 
 .dropzone{display:block;width:100%;padding:22px 18px;border:2px dashed var(--mist);border-radius:12px;background:var(--paper);cursor:pointer;text-align:left}
@@ -92,7 +93,7 @@ div.row{cursor:default}
 .rp-read{flex:1;min-width:0}
 .rp-read b{font:700 30px/1 var(--cond);font-variant-numeric:tabular-nums;display:block}
 .rp-read span{font-size:13px;color:var(--ink2);display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-#rate{border:1px solid var(--line);border-radius:8px;padding:8px 6px;background:var(--snow);font-weight:600}
+#rate{font-size:16px;border:1px solid var(--line);border-radius:8px;padding:8px 6px;background:var(--snow);font-weight:600}
 #profile{display:block;width:100%;height:110px;margin-top:10px;touch-action:none;cursor:ew-resize}
 #scrub{width:100%;margin:2px 0 0;accent-color:var(--red)}
 .rp-opts{display:flex;flex-wrap:wrap;gap:4px 18px;font-size:13.5px;color:var(--ink2);margin-top:4px}
@@ -158,18 +159,36 @@ div.row{cursor:default}
 #drop div{border:3px dashed #fff;border-radius:18px;padding:40px 50px;color:#fff;font:700 34px/1.1 var(--cond)}
 #toast{position:fixed;z-index:30;left:50%;bottom:26px;transform:translateX(-50%);background:var(--ink);color:#fff;padding:11px 18px;border-radius:10px;font-weight:500;max-width:min(92vw,520px);box-shadow:0 8px 30px rgba(0,0,0,.4);text-align:center}
 
-/* móvil: mapa arriba, cuaderno abajo */
+/* móvil: mapa arriba, cuaderno abajo; el cuaderno se sube y se baja con el tirador */
 @media (max-width:899px){
-  #panel{left:0;right:0;bottom:0;top:auto;width:auto;height:56dvh;border-radius:16px 16px 0 0}
-  body[data-view=stats] #panel,body[data-view=add] #panel{height:calc(100dvh - 70px)}
-  #tabs{padding:0 6px;overflow-x:auto}
-  #tabs a{padding:13px 8px 10px;font-size:14px}
+  #panel{left:0;right:0;bottom:0;top:auto;width:auto;height:var(--sheet-h,56dvh);max-height:calc(100dvh - 56px - env(safe-area-inset-top));border-radius:18px 18px 0 0;transition:height .25s ease}
+  #panel.dragging{transition:none}
+  #grip{display:block;flex:none;width:100%;height:24px;border:0;background:var(--paper);cursor:grab;touch-action:none;padding:0}
+  #grip i{display:block;width:44px;height:5px;border-radius:3px;background:var(--mist);margin:9px auto 0}
+  #tabs{padding:0 6px;justify-content:space-between}
+  #tabs a{padding:8px 10px 10px;font-size:15px}
+  #tabs .brand{margin-right:0}
   #tabs .brand span{display:none}
-  #body{padding:16px 16px calc(34px + env(safe-area-inset-bottom))}
-  .hero{font-size:38px}
-  #mapctl{top:calc(10px + env(safe-area-inset-top));right:10px}
-  #hud{top:calc(54px + env(safe-area-inset-top));right:10px}
+  #body{padding:14px 16px calc(34px + env(safe-area-inset-bottom))}
+  body[data-view=day] #body{display:flex;flex-direction:column}
+  body[data-view=day] #body>*{flex:none}
+  body[data-view=day] .replay{order:-1;margin-bottom:12px}
+  .hero{font-size:36px}
+  .lead{font-size:15px}
+  .stat{padding:10px 10px 8px}
+  .stat b{font-size:27px}
+  .stat.long b{font-size:20px;line-height:27px}
+  .row{padding:10px}
+  .split{flex-direction:column;align-items:flex-start}
+  .badges li{padding:9px 10px}
+  .actions .btn{flex:1 1 100%}
+  #mapctl{top:calc(10px + env(safe-area-inset-top));right:10px;left:10px}
+  .seg button,.chip{padding:9px 12px;font-size:14px}
+  #hud{top:calc(58px + env(safe-area-inset-top));right:10px}
   .maplibregl-ctrl-bottom-right{display:none}
-  #toast{bottom:calc(56dvh + 10px)}
+  .pin b{font-size:16px}
+  #toast{bottom:calc(var(--sheet-h,56dvh) + 10px)}
+  #drop div{font-size:26px;padding:30px}
 }
+@media (max-width:899px) and (prefers-reduced-motion:reduce){#panel{transition:none}}
 @media (prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}

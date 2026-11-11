@@ -58,8 +58,11 @@ export class MapView {
     addEventListener('resize', () => this.pad());
   }
   pad() {
-    const p = document.getElementById('panel').getBoundingClientRect(), wide = innerWidth >= 900;
-    this.map.setPadding(wide ? { left: p.right, top: 0, right: 0, bottom: 0 } : { left: 0, top: 0, right: 0, bottom: Math.max(0, innerHeight - p.top) });
+    const wide = innerWidth >= 900, m = this.map;
+    if (wide) return m.setPadding({ left: document.getElementById('panel').getBoundingClientRect().right, top: 0, right: 0, bottom: 0 });
+    // en móvil se usa la altura de destino del cuaderno, no la que tenga a mitad de animación
+    const h = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--sheet-h')) || innerHeight * 0.56;
+    m.setPadding({ left: 0, top: 96, right: 0, bottom: Math.min(h, innerHeight - 62) });
   }
   setBase(mode) {
     const b = BASES[mode], m = this.map;

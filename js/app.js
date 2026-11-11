@@ -46,7 +46,7 @@ async function importFiles(fileList) {
       }
     } catch (e) { errors.push(`${file.name}: ${e.message}`); }
   }
-  refresh(); navigator.storage?.persist?.();
+  refresh(); navigator.storage?.persist?.(); setTimeout(autoNames, 300);
   toast([added && `${added} ${added === 1 ? 'día añadido' : 'días añadidos'}`, dup && `${dup} ya ${dup === 1 ? 'estaba' : 'estaban'} (actualizado)`, errors.length && `${errors.length} con error`].filter(Boolean).join(' · ') || 'Nada que importar');
   S.importErrors = errors;
   if (added === 1 && files.length === 1 && !errors.length) location.hash = '#/d/' + encodeURIComponent(S.days.find(d => d.file === files[0].name)?.id || S.days[0].id);
@@ -59,6 +59,43 @@ addEventListener('dragenter', e => { if (e.dataTransfer?.types?.includes('Files'
 addEventListener('dragleave', () => { if (--dragN <= 0) { dragN = 0; $('#drop').hidden = true; } });
 addEventListener('dragover', e => e.preventDefault());
 addEventListener('drop', e => { e.preventDefault(); dragN = 0; $('#drop').hidden = true; if (e.dataTransfer?.files?.length) importFiles(e.dataTransfer.files); });
+
+/* ---------- nombres y dificultad automáticos (OpenStreetMap) ---------- */
+const naming = new Set(); const MONTH = 30 * 864e5;
+function bboxOf(days) {
+  let s = 90, n = -90, w = 180, e = -180;
+  for (const d of days) { const T = d.track; for (let i = 0; i < T.t.length; i += 5) { s = Math.min(s, T.lat[i]); n = Math.max(n, T.lat[i]); w = Math.min(w, T.lon[i]); e = Math.max(e, T.lon[i]); } }
+  return [s - 0.004, w - 0.004, n + 0.004, e + 0.004];
+}
+const covers = (a, b) => a[0] <= b[0] && a[1] <= b[1] && a[2] >= b[2] && a[3] >= b[3];
+async function autoNames() {
+  if (!S.A || navigator.onLine === false) return;
+  let changed = false;
+  for (const r of S.A.resorts.values()) {
+    if (naming.has(r.key)) continue;
+    naming.add(r.key);
+    try {
+      const need = bboxOf(r.days); let cache = await db.get('ways:' + r.key).catch(() => null);
+      const stale = !cache || !covers(cache.bbox, need) || Date.now() - cache.at > MONTH;
+      const pend = stale ? r.days : r.days.filter(d => !(d.id in S.runNames));
+      if (!pend.length) continue;
+      if (stale) { if (Date.now() - (S.lastTry?.[r.key] || 0) < 60000) continue; (S.lastTry ||= {})[r.key] = Date.now();
+        cache = { bbox: need, at: Date.now(), ways: await fetchWays(need) }; await db.set('ways:' + r.key, cache).catch(() => {}); }
+      for (const d of pend) { const m = matchDay(d, cache.ways); S.runNames[d.id] = m.runs; for (const [id, nm] of Object.entries(m.lifts)) S.liftNames[id] ||= nm; }
+      await db.set('runNames', S.runNames).catch(() => {}); await db.set('liftNames', S.liftNames).catch(() => {});
+      delete S.namesFail; changed = true;
+    } catch { S.namesFail = true; changed = true; }
+    finally { naming.delete(r.key); }
+  }
+  if (changed) rerender();
+}
+function rerender() {
+  if (document.activeElement?.matches?.('.rename')) return;      // no pisar lo que se está escribiendo
+  const y = body.scrollTop, t = replay.t, was = replay.playing, v = document.body.dataset.view;
+  S.keepMap = true; try { route(true); } finally { S.keepMap = false; }
+  body.scrollTop = y; if (v === 'day' && replay.d) { replay.set(t, false); if (was) replay.play(); }
+}
+addEventListener('online', () => autoNames());
 
 /* ---------- piezas de interfaz ---------- */
 const stat = (v, l, cls = '') => `<div class="stat ${cls}${String(v).length > 6 ? ' long' : ''}"><b>${v}</b><span>${l}</span></div>`;
@@ -104,9 +141,9 @@ function viewResort(key) {
     <p class="lead">${r.days.length} ${r.days.length === 1 ? 'día esquiado' : 'días esquiados'}. En rojo, todas tus bajadas superpuestas: cuanto más intenso, más veces has pasado.</p>
     <div class="stats">${stat(f.km(r.dist), 'km')}${stat(f.int(r.vert), 'm de desnivel')}${stat(r.runs, 'bajadas')}${stat(Math.round(r.top * KMH), 'km/h de máxima', 'hot')}${stat(f.int(r.peak), 'm cota máxima')}${stat(f.dur(A.liftTime), 'en remontes')}</div>
     <h2>Días aquí</h2><div class="list">${r.days.map(dayRow).join('')}</div>
-    ${lifts.length ? `<h2>Remontes que usas</h2><p class="note">Slopes no guarda el nombre. Escríbelo tú, o usa «Buscar nombres» dentro de un día.</p>${liftRows(lifts)}` : ''}
+    ${lifts.length ? `<h2>Remontes que usas</h2><p class="note">Los nombres se buscan solos en OpenStreetMap. Si alguno no aparece o está mal, escríbelo tú.</p>${liftRows(lifts)}` : ''}
     <h2>Hacia dónde bajas</h2><div class="split">${rose(A.rose)}<p class="note">Orientación de tus bajadas, por metros recorridos. Las laderas norte guardan mejor la nieve.</p></div>`;
-  mv.showResort(r.days);
+  if (!S.keepMap) mv.showResort(r.days);
 }
 
 function insights(d, s) {
@@ -143,17 +180,19 @@ function viewDay(id) {
     <h2>A qué velocidad bajas</h2>${bars(BANDS.map((b, i) => ({ label: b + (i === BANDS.length - 1 ? '+' : ''), value: s.bands[i] / 60, color: SPEED_STOPS.reduce((c, [v, col]) => b + 5 >= v ? col : c, SPEED_STOPS[0][1]) })), { unit: 'min', fmt: v => v >= 10 ? Math.round(v) : v.toFixed(1).replace('.', ','), height: 100 })}
     <p class="note">Minutos de bajada en cada tramo de 10 km/h.</p>
     <h2>Bajadas</h2>
-    <p class="note">${hasNames ? 'Color y nombre según OpenStreetMap; donde no hay dato, color estimado por la pendiente.' : 'El color del disco es una estimación por la pendiente media, no la dificultad oficial de la pista.'}</p>
+    <p class="note">${hasNames ? 'Nombre y color de OpenStreetMap, actualizados solos. Donde no hay dato, el color se estima por la pendiente.'
+      : !(d.id in S.runNames) && !S.namesFail ? 'Buscando nombres y dificultad de las pistas… Mientras tanto, el color se estima por la pendiente.'
+      : S.namesFail && !(d.id in S.runNames) ? 'Sin conexión con OpenStreetMap; se volverá a intentar solo. De momento, el color se estima por la pendiente.'
+      : 'OpenStreetMap no tiene nombres para estas pistas; el color se estima por la pendiente media.'}</p>
     <div class="list">${s.runs.map(r => `<button class="row" data-act="run:${r.n}"><span class="disc" style="background:${runColor(r)}">${r.n}</span>
       <span class="what"><b>${names[r.n]?.name ? esc(names[r.n].name) : f.hm(r.t0, d.tz) + ' · ' + f.ms(r.dur)}</b><i>${names[r.n]?.name ? f.hm(r.t0, d.tz) + ', ' : ''}${f.km(r.dist)} km, ${f.int(r.vert)} m, ${Math.round(r.grad)} % de pendiente</i></span>
       <span class="num">${Math.round(r.top * KMH)}<small>km/h</small></span></button>`).join('')}</div>
     <h2>Remontes</h2>${liftRows([...aggregate([d]).lifts.values()].sort((a, b) => b.count - a.count))}
     <h2>Hacia dónde bajaste</h2><div class="split">${rose(s.rose)}<p class="note">Orientación de las bajadas del día, por metros recorridos.</p></div>
     <div class="actions"><button class="btn primary" data-act="share">Crear tarjeta para compartir</button>
-      <button class="btn" data-act="names">Buscar nombres de pistas</button>
       <button class="btn danger" data-act="del:${esc(d.id)}">Eliminar este día</button></div>
-    <p class="note">«Buscar nombres» consulta OpenStreetMap con la zona del día (no envía tu traza) y es aproximado donde dos pistas van pegadas.</p>`;
-  mv.showDay(d); replay.attach(d, s);
+    <p class="note">Para los nombres se consulta a OpenStreetMap la zona de la estación, no tu traza. Es aproximado donde dos pistas van pegadas.</p>`;
+  if (!S.keepMap) mv.showDay(d); replay.attach(d, s);
 }
 
 function viewStats() {
@@ -271,7 +310,7 @@ async function act(name, el) {
   const [cmd, ...rest] = name.split(':'), arg = rest.join(':');
   if (cmd === 'pick') $('#file').click();
   else if (cmd === 'play') replay.toggle();
-  else if (cmd === 'run') { const d = replay.d, r = d && dayStats(d).runs.find(x => x.n === +arg); if (!r) return; replay.stop(); mv.highlight(r.n); mv.fitAction(d, r); replay.set(r.t0, false); if (innerWidth < 900) body.scrollTo({ top: 0, behavior: 'smooth' }); }
+  else if (cmd === 'run') { const d = replay.d, r = d && dayStats(d).runs.find(x => x.n === +arg); if (!r) return; replay.stop(); mv.highlight(r.n); mv.fitAction(d, r); replay.set(r.t0, false); if (innerWidth < 900) { sheet.set('half'); body.scrollTo({ top: 0 }); } }
   else if (cmd === 'del') {
     if (el.dataset.sure) { await db.delDay(arg); S.days = S.days.filter(d => d.id !== arg); refresh(); toast('Día eliminado'); if (location.hash.startsWith('#/d/')) location.hash = '#/'; else route(); }
     else { el.dataset.sure = '1'; el.textContent = 'Pulsa otra vez para eliminar'; setTimeout(() => { if (el.isConnected) { delete el.dataset.sure; el.textContent = el.classList.contains('small') ? 'Eliminar' : 'Eliminar este día'; } }, 4000); }
@@ -282,17 +321,6 @@ async function act(name, el) {
       if (navigator.canShare?.({ files: [file] })) await navigator.share({ files: [file] }).catch(() => {});
       else { const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: name }); a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 5000); toast('Tarjeta descargada'); }
     } finally { el.disabled = false; }
-  }
-  else if (cmd === 'names') {
-    const d = replay.d; el.disabled = true; el.textContent = 'Consultando OpenStreetMap…';
-    try {
-      const T = d.track; let s = 90, n = -90, w = 180, e = -180; for (let i = 0; i < T.t.length; i += 5) { s = Math.min(s, T.lat[i]); n = Math.max(n, T.lat[i]); w = Math.min(w, T.lon[i]); e = Math.max(e, T.lon[i]); }
-      const ways = await fetchWays([s - 0.003, w - 0.003, n + 0.003, e + 0.003]), m = matchDay(d, ways);
-      S.runNames[d.id] = m.runs; for (const [id, nm] of Object.entries(m.lifts)) S.liftNames[id] ||= nm;
-      await db.set('runNames', S.runNames); await db.set('liftNames', S.liftNames);
-      const k = Object.values(m.runs).filter(r => r.name).length;
-      toast(k ? `Nombre encontrado para ${k} de ${d.runCount} bajadas` : 'OpenStreetMap no tiene nombres para estas pistas'); const y = body.scrollTop; viewDay(d.id); body.scrollTop = y;
-    } catch { toast('No se pudo consultar OpenStreetMap. Prueba más tarde.'); el.disabled = false; el.textContent = 'Buscar nombres de pistas'; }
   }
   else if (cmd === 'backup') {
     const raws = await db.allRaw(), zip = {}; raws.forEach((r, i) => { zip[(r.name || `dia-${i}`).replace(/\.slopes$/i, '') + `-${i}.slopes`] = [r.bytes, { level: 0 }]; });
@@ -308,22 +336,43 @@ $('#mapctl').addEventListener('click', e => {
   if (e.target.id === 'btn-pistes') { const on = !e.target.classList.contains('on'); e.target.classList.toggle('on', on); e.target.setAttribute('aria-pressed', on); mv.ready.then(() => mv.setPistes(on)); }
 });
 
+/* ---------- cuaderno deslizable en móvil ---------- */
+const sheet = {
+  state: 'half',
+  px(st) { const H = innerHeight; return st === 'peek' ? 176 : st === 'full' ? H - 62 : Math.round(H * 0.56); },
+  set(st, quiet) { this.state = st; document.documentElement.style.setProperty('--sheet-h', this.px(st) + 'px'); if (!quiet) mv.pad(); },
+  init() {
+    const g = $('#grip'), p = $('#panel'); let y0 = null, h0 = 0, moved = false;
+    g.addEventListener('pointerdown', e => { y0 = e.clientY; h0 = p.getBoundingClientRect().height; moved = false; g.setPointerCapture(e.pointerId); p.classList.add('dragging'); });
+    g.addEventListener('pointermove', e => { if (y0 == null) return; const dy = y0 - e.clientY; if (Math.abs(dy) > 6) moved = true;
+      document.documentElement.style.setProperty('--sheet-h', Math.max(120, Math.min(innerHeight - 62, h0 + dy)) + 'px'); });
+    const end = () => { if (y0 == null) return; y0 = null; p.classList.remove('dragging');
+      if (!moved) return this.set({ peek: 'half', half: 'full', full: 'peek' }[this.state]);
+      const h = p.getBoundingClientRect().height; this.set(['peek', 'half', 'full'].reduce((b, s) => Math.abs(this.px(s) - h) < Math.abs(this.px(b) - h) ? s : b)); };
+    g.addEventListener('pointerup', end); g.addEventListener('pointercancel', end);
+    g.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); this.set({ peek: 'half', half: 'full', full: 'peek' }[this.state]); } });
+    addEventListener('resize', () => this.set(this.state));
+  },
+};
+sheet.init();
+
 /* ---------- rutas y arranque ---------- */
-function route() {
+function route(keep) {
   const h = location.hash.replace(/^#\/?/, ''), [p, arg] = h.split('/'), key = arg ? decodeURIComponent(arg) : '';
   const view = p === 'r' ? 'resort' : p === 'd' ? 'day' : p === 'stats' ? 'stats' : p === 'add' ? 'add' : 'home';
+  if (keep !== true && document.body.dataset.view !== view) sheet.set(view === 'stats' || view === 'add' ? 'full' : 'half', true);
   document.body.dataset.view = view; if (view !== 'day') replay.detach();
   document.querySelectorAll('#tabs [data-tab]').forEach(a => a.classList.toggle('on', a.dataset.tab === (view === 'resort' || view === 'day' ? 'home' : view)));
   mv.pad();
   ({ home: viewHome, stats: viewStats, add: viewAdd, resort: () => viewResort(key), day: () => viewDay(key) })[view]();
-  body.scrollTop = 0;
+  if (keep !== true) body.scrollTop = 0;
 }
-addEventListener('hashchange', route);
+addEventListener('hashchange', () => route());
 addEventListener('resize', () => { if (replay.d) { replay.drawBase(); replay.set(replay.t, false); } });
 
 (async () => {
   try { S.days = await db.allDays(); S.liftNames = (await db.get('liftNames')) || {}; S.runNames = (await db.get('runNames')) || {}; }
   catch { toast('Este navegador no deja guardar datos (¿modo privado?). Podrás ver los días, pero no se conservarán.', 8000); }
-  refresh(); route();
+  refresh(); route(); autoNames();
   if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
 })();

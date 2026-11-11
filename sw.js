@@ -1,5 +1,5 @@
 // Traza: caché de la app (red primero, para no quedarse con versiones viejas) y de teselas de mapa.
-const V = 'traza-v1';
+const V = 'traza-v2';
 const SHELL = ['./','index.html','css/app.css','js/app.js','js/db.js','js/parse.js','js/stats.js','js/charts.js','js/mapview.js','js/osm.js','js/share.js',
   'vendor/maplibre-gl.js','vendor/maplibre-gl.css','vendor/fflate.js','manifest.webmanifest','icons/icon.svg',
   'fonts/barlow-latin-400-normal.woff2','fonts/barlow-latin-500-normal.woff2','fonts/barlow-latin-600-normal.woff2',
