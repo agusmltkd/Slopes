@@ -1,0 +1,11 @@
+name = "traza-avisos"
+main = "snow-alerts.js"
+compatibility_date = "2025-06-01"
+
+# Todos los días a las 7:17 en Madrid (6:17 UTC en invierno)
+[triggers]
+crons = ["17 6 * * *"]
+
+[[kv_namespaces]]
+binding = "TRAZA"
+id = "PON_AQUI_EL_ID_DEL_KV"

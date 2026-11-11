@@ -86,6 +86,49 @@ export function createLive({ S, mv, f, db, toast, esc }) {
   }
   document.addEventListener('visibilitychange', () => { if (L.watch != null && document.visibilityState === 'visible') lock(); });
 
+  /* ----- avisos de nieve (Worker propio + Telegram) ----- */
+  async function alertsCfg() { return (await db.get('alerts').catch(() => null)) || null; }
+  async function post(cfg, path, body) {
+    const r = await fetch(cfg.url.replace(/\/+$/, '') + path, { method: 'POST', headers: { Authorization: 'Bearer ' + cfg.key, 'Content-Type': 'application/json' }, body: body ? JSON.stringify(body) : '{}' });
+    const j = await r.json().catch(() => ({})); if (!r.ok || !j.ok) throw new Error(j.error || 'HTTP ' + r.status); return j;
+  }
+  async function sync(cfg) {
+    cfg ||= await alertsCfg(); if (!cfg) return;
+    if (L.trip === null) L.trip = (await db.get('trip').catch(() => null)) || undefined;
+    const resorts = [...S.A.resorts.values()].map(r => ({ key: r.key, name: r.name, lat: r.lat, lon: r.lon, peak: r.peak }));
+    await post(cfg, '/config', { resorts, trip: L.trip || null, threshold: cfg.threshold });
+    cfg.at = Date.now(); cfg.n = resorts.length; await db.set('alerts', cfg);
+  }
+  async function alertsHtml() {
+    const c = await alertsCfg();
+    if (!c || L.editAlerts) return `<div class="alerts"><p class="note">Recibe un mensaje en Telegram cuando vaya a nevar fuerte en tus estaciones y los días antes del viaje. Necesita el pequeño servidor que está en la carpeta <b>worker</b> del repositorio (las instrucciones están allí).</p>
+      <label>Dirección del servidor <input id="al-url" type="url" inputmode="url" placeholder="https://traza-avisos.tu-usuario.workers.dev" value="${esc(c?.url || '')}"></label>
+      <label>Clave <input id="al-key" type="password" autocomplete="off" value="${esc(c?.key || '')}"></label>
+      <label>Avisar desde <select id="al-th">${[10, 20, 30, 50].map(v => `<option value="${v}"${(c?.threshold || 20) === v ? ' selected' : ''}>${v} cm en 3 días</option>`).join('')}</select></label>
+      <div class="actions"><button class="btn primary" data-act="al-save">Activar avisos</button>${c ? '<button class="btn" data-act="al-cancel">Cancelar</button>' : ''}</div></div>`;
+    return `<div class="alerts on"><b>Avisos activos</b><span>${c.n || 0} ${c.n === 1 ? 'estación' : 'estaciones'}, desde ${c.threshold} cm en 3 días${L.trip ? ', y a 7, 3 y 1 día del viaje' : ''}. Se comprueba cada mañana a las 7:17.</span>
+      <div class="actions"><button class="btn primary" data-act="al-test">Enviar aviso de prueba</button><button class="btn" data-act="al-edit">Cambiar</button><button class="btn danger" data-act="al-off">Desactivar</button></div></div>`;
+  }
+  async function alertsAct(cmd, el) {
+    const box = () => document.querySelector('#alerts-box');
+    if (cmd === 'al-save') {
+      const cfg = { url: $('#al-url').value.trim(), key: $('#al-key').value.trim(), threshold: +$('#al-th').value };
+      if (!/^https:\/\//.test(cfg.url) || !cfg.key) return toast('Pon la dirección (empieza por https://) y la clave.');
+      el.disabled = true; el.textContent = 'Conectando…';
+      try { await sync(cfg); L.editAlerts = false; toast(`Avisos activados para ${cfg.n} ${cfg.n === 1 ? 'estación' : 'estaciones'}`); }
+      catch (e) { toast('No se pudo conectar: ' + e.message, 6000); el.disabled = false; el.textContent = 'Activar avisos'; return; }
+    } else if (cmd === 'al-test') {
+      el.disabled = true; try { await post(await alertsCfg(), '/test'); toast('Mensaje de prueba enviado. Mira Telegram.'); } catch (e) { toast('No se pudo enviar: ' + e.message, 6000); } el.disabled = false; return;
+    } else if (cmd === 'al-edit') L.editAlerts = true;
+    else if (cmd === 'al-cancel') L.editAlerts = false;
+    else if (cmd === 'al-off') {
+      if (!el.dataset.sure) { el.dataset.sure = '1'; el.textContent = 'Pulsa otra vez'; return; }
+      const c = await alertsCfg(); try { await post(c, '/config', { resorts: [], trip: null, threshold: c.threshold }); } catch { /* aunque falle, se olvida aquí */ }
+      await db.set('alerts', null); toast('Avisos desactivados');
+    }
+    if (box()) box().innerHTML = await alertsHtml();
+  }
+
   /* ----- vista ----- */
   function gpsHtml() {
     if (L.watch == null) {
@@ -112,15 +155,17 @@ export function createLive({ S, mv, f, db, toast, esc }) {
     const body = $('#body'), resorts = [...S.A.resorts.values()].sort((a, b) => b.days.length - a.days.length);
     body.innerHTML = `<div id="lv"><h1 class="hero">En vivo</h1>${gpsHtml()}
       <h2>Próximo viaje</h2>${tripHtml()}
+      <h2>Avisos de nieve en Telegram</h2><div id="alerts-box"></div>
       <h2>Parte de nieve</h2>
       ${resorts.length ? resorts.map((r, i) => `<section class="wx"><h3>${esc(r.name)} <span>en cota alta, ${f.int(r.peak)} m</span></h3><div id="wx-${i}"><p class="note">Consultando la previsión…</p></div></section>`).join('')
         : '<p class="note">Añade algún día y aquí verás la nieve prevista en tus estaciones.</p>'}
       <p class="note">Previsión de Open-Meteo. Es un modelo meteorológico, no el parte oficial de la estación: no dice qué pistas o remontes están abiertos.</p></div>`;
     resorts.forEach((r, i) => weather(r).then(w => { const el = $('#wx-' + i); if (el) el.innerHTML = wxHtml(r, w); })
       .catch(() => { const el = $('#wx-' + i); if (el) el.innerHTML = '<p class="note">No se pudo consultar la previsión. Revisa la conexión.</p>'; }));
+    alertsHtml().then(h => { const b = $('#alerts-box'); if (b) b.innerHTML = h; });
     paint();
     const fo = $('#lv-follow'); if (fo) fo.onchange = e => { mv.follow = e.target.checked; };
-    $('#trip-date').onchange = async e => { L.trip = e.target.value || null; await db.set('trip', L.trip).catch(() => {}); render(); };
+    $('#trip-date').onchange = async e => { L.trip = e.target.value || null; await db.set('trip', L.trip).catch(() => {}); render(); sync().catch(() => {}); };
   }
   return {
     async view(keepMap) {
@@ -128,6 +173,7 @@ export function createLive({ S, mv, f, db, toast, esc }) {
       render();
       if (!keepMap && L.watch == null) { const r = [...S.A.resorts.values()].sort((a, b) => b.days.length - a.days.length)[0]; r ? mv.showResort(r.days, { mode: 'live' }) : mv.showGlobe([]); }
     },
+    alertsAct, sync: () => sync().catch(() => {}),
     start, stop, leave() { if (L.watch != null) stop(); }, active: () => L.watch != null,
   };
 }

@@ -187,6 +187,46 @@ div.row{cursor:default}
 .trip>span{display:block;color:var(--ink2);margin:3px 0 12px}
 .trip label{display:flex;align-items:center;gap:10px;font-size:14px;color:var(--ink2)}
 .trip input{font-size:16px;border:1px solid var(--line);border-radius:8px;padding:7px 9px;background:var(--snow)}
+.ghost{width:16px;height:16px;border-radius:50%;background:rgba(255,255,255,.85);border:2px dashed #0F2740;box-shadow:0 0 0 4px rgba(255,255,255,.35)}
+#rp-ghost{display:block;font-weight:600;font-size:13px}
+#rp-ghost.behind{color:var(--red)}#rp-ghost.ahead{color:var(--green)}
+.rp-ghostnote{margin:6px 0 0;font-size:12.5px}
+.what i em{font-style:normal;color:var(--red);font-weight:500}
+.what i em.best{color:var(--green)}
+.disc.rank{background:var(--ink)}.disc.rank.gold{background:var(--sun);color:var(--ink)}
+.delta{font-size:13px;font-weight:600;color:var(--red);white-space:nowrap}
+.segcard{background:var(--paper);border:1px solid var(--line);border-radius:10px;margin-bottom:8px}
+.segcard summary{display:flex;align-items:center;gap:12px;padding:10px 12px;cursor:pointer;list-style:none}
+.segcard summary::-webkit-details-marker{display:none}
+.segcard summary::after{content:"";width:8px;height:8px;border-right:2px solid var(--ink2);border-bottom:2px solid var(--ink2);transform:rotate(45deg);margin:-4px 4px 0 0;flex:none}
+.segcard[open] summary::after{transform:rotate(225deg);margin-top:4px}
+.segcard[open]{padding-bottom:12px}
+.segcard>.list,.segcard>.note,.segcard>.bars,.segcard>.actions{margin-left:12px;margin-right:12px}
+.segcard>.actions{margin-top:12px}
+.segedit{background:var(--paper);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+.segedit label{display:flex;align-items:center;gap:10px;margin:8px 0;font-size:14px;color:var(--ink2)}
+.segedit select,.segedit input:not([type=range]){flex:1;min-width:0;font-size:16px;border:1px solid var(--line);border-radius:8px;padding:7px 9px;background:var(--snow);color:var(--ink)}
+.segedit input[type=range]{flex:1;accent-color:var(--red)}
+#seg-editor{margin-top:16px}
+.heatseg{display:inline-flex;margin:0 0 4px;box-shadow:none;border:1px solid var(--line)}
+.heatseg button{font-size:13.5px}
+#heat-note .speedlegend{margin-top:8px}
+.videobox{display:flex;gap:8px;flex-wrap:wrap}
+.videobox select{flex:1;min-width:0;font-size:16px;border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:var(--paper)}
+.vidmodal{position:fixed;inset:0;z-index:40;background:rgba(4,12,22,.9);display:grid;place-items:center;padding:16px}
+.vm-card{width:min(380px,100%);color:#fff;text-align:center}
+.vm-card canvas,.vm-card video{width:100%;max-height:68dvh;object-fit:contain;aspect-ratio:9/16;border-radius:12px;background:#0F2740;display:block;margin:0 auto}
+.vm-bar{height:6px;background:rgba(255,255,255,.18);border-radius:3px;margin:14px 0 8px;overflow:hidden}
+.vm-bar i{display:block;height:100%;width:0;background:var(--red)}
+.vm-card p{margin:8px 0;color:#C9D6E2}
+.vm-card .actions{justify-content:center;margin-top:10px}
+.vm-card .btn:not(.primary){background:transparent;color:#fff;border-color:#fff}
+.alerts{background:var(--paper);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+.alerts label{display:flex;flex-direction:column;gap:4px;margin:10px 0;font-size:13.5px;color:var(--ink2)}
+.alerts input,.alerts select{font-size:16px;border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:var(--snow);color:var(--ink);width:100%}
+.alerts.on>b{display:block;font:600 22px/1.1 var(--cond);color:var(--green)}
+.alerts.on>span{display:block;color:var(--ink2);font-size:14px;margin-top:3px}
+.alerts .actions{margin-top:12px}
 .skier{width:18px;height:18px;border-radius:50%;background:var(--red);border:3px solid #fff;box-shadow:0 0 0 2px var(--ink),0 2px 8px rgba(0,0,0,.5)}
 #drop{position:fixed;inset:0;z-index:20;background:rgba(15,39,64,.86);display:grid;place-items:center;pointer-events:none}
 #drop div{border:3px dashed #fff;border-radius:18px;padding:40px 50px;color:#fff;font:700 34px/1.1 var(--cond)}

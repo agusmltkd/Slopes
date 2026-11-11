@@ -43,12 +43,17 @@ export class MapView {
     map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'bottom-right');
     map.on('error', () => {});                          // una tesela que falla no debe romper nada
     this.ready = new Promise(res => map.on('load', () => {
-      for (const id of ['heat', 'lifts', 'runs', 'trail']) map.addSource(id, { type: 'geojson', data: FC() });
+      for (const id of ['heat', 'lifts', 'runs', 'trail', 'speed', 'seg']) map.addSource(id, { type: 'geojson', data: FC() });
       map.addLayer({ id: 'heat', type: 'line', source: 'heat', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#D7263D', 'line-opacity': 0.34, 'line-width': ['interpolate', ['linear'], ['zoom'], 11, 1.5, 15, 4] } });
       map.addLayer({ id: 'lifts', type: 'line', source: 'lifts', paint: { 'line-color': '#F2B705', 'line-width': 2.2, 'line-dasharray': [2, 1.5] } });
       map.addLayer({ id: 'hl', type: 'line', source: 'runs', filter: ['==', ['get', 'n'], -1], layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#FFFFFF', 'line-width': 12, 'line-opacity': 0.95 } });
       map.addLayer({ id: 'runs-case', type: 'line', source: 'runs', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#0F2740', 'line-width': 6.5, 'line-opacity': 0.55 } });
       map.addLayer({ id: 'runs', type: 'line', source: 'runs', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': ['interpolate', ['linear'], ['get', 'v'], ...SPEED_STOPS.flat()], 'line-width': 4 } });
+      map.addLayer({ id: 'speed', type: 'circle', source: 'speed', paint: {
+        'circle-color': ['interpolate', ['linear'], ['get', 'v'], ...SPEED_STOPS.flat()],
+        'circle-radius': ['interpolate', ['exponential', 2], ['zoom'], 12, 1.6, 15, 6, 17, 22], 'circle-opacity': 0.85, 'circle-blur': 0.35 } }, 'lifts');
+      map.addLayer({ id: 'seg-case', type: 'line', source: 'seg', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#0F2740', 'line-width': 11 } });
+      map.addLayer({ id: 'seg', type: 'line', source: 'seg', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#FFFFFF', 'line-width': 6 } });
       map.addLayer({ id: 'trail', type: 'line', source: 'trail', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#FFFFFF', 'line-width': 5, 'line-opacity': 0.95 } });
       this.setBase('nieve'); res();
     }));
@@ -74,7 +79,21 @@ export class MapView {
     for (const [k, v] of Object.entries(b.paint)) m.setPaintProperty('sat', k, v);
   }
   setPistes(on) { this.map.setLayoutProperty('pistes', 'visibility', on ? 'visible' : 'none'); }
-  clear() { for (const id of ['heat', 'lifts', 'runs', 'trail']) this.map.getSource(id).setData(FC()); this.cursor.remove(); this.highlight(-1); }
+  clear() { this.ghost?.remove(); for (const id of ['heat', 'lifts', 'runs', 'trail', 'speed', 'seg']) this.map.getSource(id).setData(FC()); this.cursor.remove(); this.highlight(-1); }
+  /** 'pasadas' = mapa de calor de por dónde pasas; 'velocidad' = media de velocidad por zona. */
+  setHeat(mode, cells) {
+    this.map.setLayoutProperty('heat', 'visibility', mode === 'velocidad' ? 'none' : 'visible');
+    this.map.getSource('speed').setData(FC(mode === 'velocidad' ? cells : []));
+  }
+  setSegment(coords, fit) {
+    this.map.getSource('seg').setData(FC(coords && coords.length > 1 ? [{ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: coords } }] : []));
+    if (fit && coords?.length > 1) { const bb = new maplibregl.LngLatBounds(); coords.forEach(c => bb.extend(c)); this.map.fitBounds(bb, { padding: 80, pitch: 60, bearing: this.uphill || 0, maxZoom: 16.5, duration: reduced ? 0 : 1100 }); }
+  }
+  setGhost(lat, lon) {
+    if (lat == null) { this.ghost?.remove(); return; }
+    if (!this.ghost) { const el = document.createElement('div'); el.className = 'ghost'; el.title = 'Tu mejor bajada por aquí'; this.ghost = new maplibregl.Marker({ element: el }); }
+    this.ghost.setLngLat([lon, lat]); if (!this.ghost._map) this.ghost.addTo(this.map);
+  }
   setTrail(coords) { const src = this.map.getSource('trail'); if (src) src.setData(FC(coords && coords.length > 1 ? [{ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: coords } }] : [])); }
   clearPins() { this.pins.forEach(p => p.remove()); this.pins = []; }
   /** Oculta los nombres que chocarían con otra chincheta o con otro nombre; manda la estación con más días. */
