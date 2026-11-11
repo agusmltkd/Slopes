@@ -43,17 +43,16 @@ export class MapView {
     map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'bottom-right');
     map.on('error', () => {});                          // una tesela que falla no debe romper nada
     this.ready = new Promise(res => map.on('load', () => {
-      for (const id of ['heat', 'lifts', 'runs', 'trail', 'resorts']) map.addSource(id, { type: 'geojson', data: FC() });
+      for (const id of ['heat', 'lifts', 'runs', 'trail']) map.addSource(id, { type: 'geojson', data: FC() });
       map.addLayer({ id: 'heat', type: 'line', source: 'heat', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#D7263D', 'line-opacity': 0.34, 'line-width': ['interpolate', ['linear'], ['zoom'], 11, 1.5, 15, 4] } });
       map.addLayer({ id: 'lifts', type: 'line', source: 'lifts', paint: { 'line-color': '#F2B705', 'line-width': 2.2, 'line-dasharray': [2, 1.5] } });
       map.addLayer({ id: 'hl', type: 'line', source: 'runs', filter: ['==', ['get', 'n'], -1], layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#FFFFFF', 'line-width': 12, 'line-opacity': 0.95 } });
       map.addLayer({ id: 'runs-case', type: 'line', source: 'runs', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#0F2740', 'line-width': 6.5, 'line-opacity': 0.55 } });
       map.addLayer({ id: 'runs', type: 'line', source: 'runs', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': ['interpolate', ['linear'], ['get', 'v'], ...SPEED_STOPS.flat()], 'line-width': 4 } });
       map.addLayer({ id: 'trail', type: 'line', source: 'trail', layout: { 'line-cap': 'round', 'line-join': 'round' }, paint: { 'line-color': '#FFFFFF', 'line-width': 5, 'line-opacity': 0.95 } });
-      map.addLayer({ id: 'resort-halo', type: 'circle', source: 'resorts', maxzoom: 9, paint: { 'circle-color': '#D7263D', 'circle-opacity': 0.22, 'circle-blur': 0.6, 'circle-radius': ['interpolate', ['linear'], ['get', 'days'], 1, 16, 20, 34] } });
-      map.addLayer({ id: 'resort-dot', type: 'circle', source: 'resorts', maxzoom: 9, paint: { 'circle-color': '#D7263D', 'circle-radius': 5.5, 'circle-stroke-color': '#FFFFFF', 'circle-stroke-width': 2.5 } });
       this.setBase('nieve'); res();
     }));
+    let q = 0; map.on('move', () => { if (!q && this.pins.length) q = requestAnimationFrame(() => { q = 0; this.declutter(); }); });
     const stop = () => { this.spinning = false; };
     for (const ev of ['mousedown', 'touchstart', 'wheel']) el.addEventListener(ev, stop, { passive: true });
     const el2 = document.createElement('div'); el2.className = 'skier';
@@ -75,9 +74,26 @@ export class MapView {
     for (const [k, v] of Object.entries(b.paint)) m.setPaintProperty('sat', k, v);
   }
   setPistes(on) { this.map.setLayoutProperty('pistes', 'visibility', on ? 'visible' : 'none'); }
-  clear() { for (const id of ['heat', 'lifts', 'runs', 'trail', 'resorts']) this.map.getSource(id).setData(FC()); this.cursor.remove(); this.highlight(-1); }
+  clear() { for (const id of ['heat', 'lifts', 'runs', 'trail']) this.map.getSource(id).setData(FC()); this.cursor.remove(); this.highlight(-1); }
   setTrail(coords) { const src = this.map.getSource('trail'); if (src) src.setData(FC(coords && coords.length > 1 ? [{ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: coords } }] : [])); }
   clearPins() { this.pins.forEach(p => p.remove()); this.pins = []; }
+  /** Oculta los nombres que chocarían con otra chincheta o con otro nombre; manda la estación con más días. */
+  declutter() {
+    if (!this.pins.length) return;
+    const placed = [], hit = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+    const order = [...this.pins].sort((a, b) => b._r.days.length - a._r.days.length);
+    for (const mk of order) {
+      const p = this.map.project(mk.getLngLat()), s = mk._s, size = 32 * s;
+      placed.push({ x: p.x - size / 2, y: p.y - 56 * s + 2 * s, w: size, h: size });
+    }
+    order.forEach((mk, i) => {
+      const tag = mk.getElement().querySelector('.tag'), head = placed[i];
+      const r = { x: head.x + head.w + 4, y: head.y + head.h / 2 - 20, w: tag.offsetWidth || 110, h: 40 };
+      const clash = placed.some((o, j) => j !== i && hit(r, o));
+      mk.getElement().classList.toggle('quiet', clash);
+      if (!clash) placed.push(r);
+    });
+  }
 
   /** resorts: [{key, name, lat, lon, days:[]}] */
   async showGlobe(resorts) {
@@ -85,12 +101,23 @@ export class MapView {
     const m = this.map; m.setTerrain(null);
     for (const r of resorts) {
       const b = document.createElement('button'); b.className = 'pin'; b.type = 'button';
-      b.innerHTML = `${r.mini || ''}<span><b></b><i>${r.days.length} ${r.days.length === 1 ? 'día' : 'días'}, cota ${String(Math.round(r.peak)).replace(/\B(?=(\d{3})+(?!\d))/g, '.')} m</i></span>`; b.querySelector('b').textContent = r.name;
-      b.setAttribute('aria-label', `Entrar en ${r.name}`);
+      const n = r.days.length, big = n >= 10 ? 1.25 : n >= 4 ? 1.12 : 1;
+      b.style.setProperty('--s', big); b.style.setProperty('--d', (this.pins.length * 0.12) + 's');
+      b.innerHTML = `<svg viewBox="0 0 40 56" width="40" height="56" aria-hidden="true">
+          <defs><radialGradient id="pg" cx="35%" cy="30%" r="75%"><stop offset="0" stop-color="#FF8A98"/><stop offset=".45" stop-color="#D7263D"/><stop offset="1" stop-color="#8E1023"/></radialGradient>
+          <linearGradient id="pn" x1="0" x2="1"><stop offset="0" stop-color="#F4F7FA"/><stop offset="1" stop-color="#8A9AAB"/></linearGradient></defs>
+          <ellipse cx="24" cy="54" rx="9" ry="2.2" fill="#000" opacity=".35"/>
+          <path d="M18.6 30h2.8L20.4 55h-.8z" fill="url(#pn)"/>
+          <circle cx="20" cy="17" r="15" fill="url(#pg)" stroke="#fff" stroke-width="2"/>
+          <ellipse cx="14.5" cy="10.5" rx="4.2" ry="2.6" fill="#fff" opacity=".45" transform="rotate(-30 14.5 10.5)"/>
+          <text x="20" y="22.5" text-anchor="middle">${n}</text></svg><span class="tag"><b></b><i>${n} ${n === 1 ? 'día' : 'días'}</i></span>`;
+      b.querySelector('b').textContent = r.name;
+      b.setAttribute('aria-label', `Entrar en ${r.name}, ${n} ${n === 1 ? 'día' : 'días'}`);
       b.addEventListener('click', () => this.onResort(r.key));
-      this.pins.push(new maplibregl.Marker({ element: b, anchor: 'bottom', offset: [0, -10] }).setLngLat([r.lon, r.lat]).addTo(m));
+      const mk = new maplibregl.Marker({ element: b, anchor: 'bottom' }).setLngLat([r.lon, r.lat]).addTo(m);
+      mk._r = r; mk._s = big; mk.getElement().style.zIndex = String(10 + n); this.pins.push(mk);
     }
-    this.map.getSource('resorts').setData(FC(resorts.map(r => ({ type: 'Feature', properties: { days: r.days.length }, geometry: { type: 'Point', coordinates: [r.lon, r.lat] } }))));
+    requestAnimationFrame(() => this.declutter());
     if (resorts.length > 1) {
       const bb = new maplibregl.LngLatBounds(); resorts.forEach(r => bb.extend([r.lon, r.lat]));
       m.fitBounds(bb, { padding: 90, maxZoom: 4.2, pitch: 0, bearing: 0, duration: reduced ? 0 : 2200 });

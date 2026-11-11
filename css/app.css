@@ -156,12 +156,17 @@ div.row{cursor:default}
 #hud #hud-time{font:700 22px/1 var(--cond)}
 #hud b{font:700 22px/1 var(--cond)}
 #hud-speed b{color:#FF6B7D}
-.pin{display:flex;align-items:center;gap:9px;border:0;background:var(--paper);border-left:6px solid var(--red);border-radius:6px;padding:6px 12px 6px 8px;text-align:left;cursor:pointer;box-shadow:0 6px 22px rgba(3,12,24,.6);margin-bottom:9px;position:relative}
-.pin .mini{flex:none;background:var(--snow);border-radius:4px}
-.pin>span{display:block}
-.pin::after{content:"";position:absolute;left:50%;bottom:-8px;margin-left:-8px;border:8px solid transparent;border-top-color:var(--paper);border-bottom:0}
-.pin b{display:block;font:700 18px/1.05 var(--cond);color:var(--ink);white-space:nowrap}
-.pin i{font-style:normal;font-size:12px;color:var(--ink2)}
+.pin{border:0;background:none;padding:0;cursor:pointer;position:relative;display:block;width:40px;height:56px;-webkit-tap-highlight-color:transparent}
+.pin svg{display:block;transform-origin:50% 100%;transform:scale(var(--s,1));filter:drop-shadow(0 3px 5px rgba(0,0,0,.45));animation:pinfall .55s cubic-bezier(.3,1.5,.5,1) var(--d,0s) backwards}
+.pin svg text{font:700 15px var(--cond);fill:#fff}
+.pin:hover svg,.pin:focus-visible svg{transform:scale(calc(var(--s,1) * 1.12))}
+.pin .tag{position:absolute;left:calc(50% + 16px * var(--s,1) + 4px);top:calc(17px * var(--s,1) + (56px - 56px * var(--s,1)));transform:translateY(-50%);text-align:left;background:rgba(8,21,38,.88);color:#fff;border-radius:6px;padding:4px 9px 5px;white-space:nowrap;pointer-events:none;transition:opacity .15s}
+.pin.quiet .tag{opacity:0}
+.pin.quiet:hover .tag,.pin.quiet:focus-visible .tag{opacity:1;z-index:5}
+.pin .tag b{display:block;font:600 16px/1.1 var(--cond)}
+.pin .tag i{display:block;font-style:normal;font-size:11.5px;line-height:1.2;color:#B7C8D9}
+@keyframes pinfall{from{transform:translateY(-70px) scale(var(--s,1));opacity:0}}
+@media (prefers-reduced-motion:reduce){.pin svg{animation:none}}
 .cockpit{display:flex;align-items:center;gap:16px;background:var(--ink);color:#fff;border-radius:12px;padding:16px 18px;margin-bottom:12px}
 .cockpit .big{flex:none;text-align:center;min-width:104px}
 .cockpit .big b{display:block;font:700 76px/.9 var(--cond);font-variant-numeric:tabular-nums;color:#FF6B7D}
@@ -214,7 +219,6 @@ div.row{cursor:default}
   .seg button,.chip{padding:9px 12px;font-size:14px}
   #hud{top:calc(58px + env(safe-area-inset-top));right:10px}
   .maplibregl-ctrl-bottom-right{display:none}
-  .pin b{font-size:16px}
   #toast{bottom:calc(var(--sheet-h,56dvh) + 10px)}
   #drop div{font-size:26px;padding:30px}
 }

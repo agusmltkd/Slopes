@@ -105,16 +105,7 @@ const dayRow = d => `<a class="row" href="#/d/${encodeURIComponent(d.id)}"><span
   <span class="what"><b>${esc(d.resort)}</b><i>${d.runCount} bajadas, ${f.km(d.distance)} km, ${f.int(d.vertical)} m</i></span><span class="num">${Math.round(d.topSpeed * KMH)}<small>km/h</small></span></a>`;
 const speedLegend = () => `<div class="speedlegend"><span>0</span><i style="background:linear-gradient(90deg,${SPEED_STOPS.map(([v, c]) => `${c} ${v / 75 * 100}%`).join(',')})"></i><span>75+ km/h</span></div>`;
 
-// Silueta de las bajadas de una estación, para su cartel en el globo.
-function miniTrace(days) {
-  const W = 58, H = 40, runs = []; let a0 = 90, a1 = -90, o0 = 180, o1 = -180;
-  for (const d of days.slice(0, 4)) { const T = d.track; for (const a of d.actions) if (a.type === 'run') { const pts = []; for (let i = a.i0; i <= a.i1; i += 6) { pts.push(i); a0 = Math.min(a0, T.lat[i]); a1 = Math.max(a1, T.lat[i]); o0 = Math.min(o0, T.lon[i]); o1 = Math.max(o1, T.lon[i]); } runs.push([T, pts]); } }
-  if (!runs.length) return '';
-  const kx = Math.cos((a0 + a1) / 2 * Math.PI / 180), sc = Math.min((W - 6) / ((o1 - o0) * kx || 1), (H - 6) / ((a1 - a0) || 1)), ox = (W - (o1 - o0) * kx * sc) / 2, oy = (H - (a1 - a0) * sc) / 2;
-  const path = runs.map(([T, pts]) => pts.map((i, k) => `${k ? 'L' : 'M'}${(ox + (T.lon[i] - o0) * kx * sc).toFixed(1)} ${(oy + (a1 - T.lat[i]) * sc).toFixed(1)}`).join('')).join('');
-  return `<svg class="mini" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" aria-hidden="true"><path d="${path}" fill="none" stroke="#D7263D" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" stroke-opacity=".8"/></svg>`;
-}
-const globeResorts = () => [...S.A.resorts.values()].map(r => { r.mini ||= miniTrace(r.days); return r; });
+const globeResorts = () => [...S.A.resorts.values()];
 
 /* ---------- vistas ---------- */
 function viewHome() {
