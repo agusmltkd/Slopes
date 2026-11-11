@@ -1,6 +1,6 @@
 import { db } from './db.js';
 import { parseFile } from './parse.js';
-import { dayStats, aggregate, badges, season, localDate, KMH, BANDS } from './stats.js';
+import { dayStats, aggregate, season, localDate, KMH, BANDS } from './stats.js';
 import { bars, stack, rose, lines } from './charts.js';
 import { MapView, SPEED_STOPS } from './mapview.js';
 import { fetchWays, matchDay } from './osm.js';
@@ -8,6 +8,8 @@ import { dayCard } from './share.js';
 import { createLive } from './live.js';
 import { ghostFor, posAt, distAt, timeToDist, segmentFromRun, efforts, speedCells, sameCourse, shape, shapeOf, SLOPE_BINS, coverage } from './compare.js';
 import { fetchResortWays } from './osm.js';
+import { allBadges } from './badges.js';
+import { openStory } from './story.js';
 import { METRICS, currentSeason, progress, changes as goalChanges, fmtV } from './goals.js';
 import { makeVideo as recordVideo } from './video.js';
 
@@ -34,13 +36,13 @@ const mv = new MapView($('#map'), { onResort: key => { location.hash = '#/r/' + 
 window.__traza = { S, mv };
 
 function toast(msg, ms = 3800) { const t = $('#toast'); t.textContent = msg; t.hidden = false; clearTimeout(toast.h); toast.h = setTimeout(() => t.hidden = true, ms); }
-function refresh() { S.days.sort((a, b) => b.start - a.start); S.A = aggregate(S.days); }   // rehace también los carteles del globo
+function refresh() { S.days.sort((a, b) => b.start - a.start); S.A = aggregate(S.days); for (const d of S.days) for (const r of dayStats(d).runs) delete r._ghost; }   // rehace también los carteles del globo
 const liftName = (id, A = S.A) => S.liftNames[id] || (() => { const ids = [...A.lifts.values()].sort((a, b) => b.count - a.count).map(l => l.id); return 'Remonte ' + String.fromCharCode(65 + (ids.indexOf(id) % 26)); })();
 
 /* ---------- importación ---------- */
 async function importFiles(fileList) {
   const files = [...fileList]; if (!files.length) return;
-  let added = 0, dup = 0; const errors = [], before = [...S.days];
+  let added = 0, dup = 0; const errors = [], before = [...S.days], hadB = new Set(allBadges(before, S).filter(b => b.got).map(b => b.name));
   toast(`Leyendo ${files.length} ${files.length === 1 ? 'fichero' : 'ficheros'}…`, 60000);
   for (const file of files) {
     try {
@@ -55,7 +57,9 @@ async function importFiles(fileList) {
   refresh(); navigator.storage?.persist?.(); setTimeout(autoNames, 300); if (added) live.sync();
   toast([added && `${added} ${added === 1 ? 'día añadido' : 'días añadidos'}`, dup && `${dup} ya ${dup === 1 ? 'estaba' : 'estaban'} (actualizado)`, errors.length && `${errors.length} con error`].filter(Boolean).join(' · ') || 'Nada que importar');
   S.importErrors = errors;
-  const gc = goalChanges(S.goals, before, S.days); if (gc.length) setTimeout(() => toast(gc.join(' · '), 6000), 3900);
+  const gc = goalChanges(S.goals, before, S.days), nb = allBadges(S.days, S).filter(b => b.got && !hadB.has(b.name)).map(b => b.name);
+  if (nb.length) gc.unshift(`${nb.length === 1 ? 'Logro nuevo' : 'Logros nuevos'}: ${nb.slice(0, 4).join(', ')}${nb.length > 4 ? '…' : ''}`);
+  if (gc.length) setTimeout(() => toast(gc.join(' · '), 7000), 3900);
   if (added === 1 && files.length === 1 && !errors.length) location.hash = '#/d/' + encodeURIComponent(S.days.find(d => d.file === files[0].name)?.id || S.days[0].id);
   else if (location.hash.startsWith('#/add') || errors.length) { location.hash = '#/add'; route(); }
   else { location.hash = '#/'; route(); }
@@ -319,7 +323,7 @@ function viewDay(id) {
     <h2>Remontes</h2>${liftRows([...aggregate([d]).lifts.values()].sort((a, b) => b.count - a.count))}
     <h2>Hacia dónde bajaste</h2><div class="split">${rose(s.rose)}<p class="note">Orientación de las bajadas del día, por metros recorridos.</p></div>
     <h2>Comparar con otro día</h2><div id="cmp-pick">${cmpPickHtml(d)}</div>
-    <div class="actions"><button class="btn primary" data-act="share">Crear tarjeta para compartir</button>
+    <div class="actions"><button class="btn primary" data-act="story">Crear historia con foto</button><button class="btn" data-act="share">Crear tarjeta para compartir</button>
       <button class="btn danger" data-act="del:${esc(d.id)}">Eliminar este día</button></div>
     <p class="note">Para los nombres se consulta a OpenStreetMap la zona de la estación, no tu traza. Es aproximado donde dos pistas van pegadas.</p>`;
   if (!S.keepMap) mv.showDay(d); replay.attach(d, s);
@@ -376,13 +380,24 @@ function viewCompare(ida, idb) {
   if (!S.keepMap) mv.showCompare(a, b, CMP);
 }
 
+function badgeLi(b) {
+  const prog = !b.got && b.prog && b.prog[0] > 0 ? `<i class="bprog"><i style="width:${(100 * b.prog[0] / b.prog[1]).toFixed(0)}%"></i></i><em>${b.unit === '%' ? b.prog[0] + ' %' : f.int(b.prog[0])} de ${b.unit === '%' ? b.prog[1] + ' %' : f.int(b.prog[1])}</em>` : '';
+  const when = b.got && b.day ? `<em>${f.dateShort(b.day)}</em>` : '';
+  const inner = `<b>${b.name}</b><span>${b.desc}</span>${when}${prog}`;
+  return b.got && b.day ? `<li class="got"><a href="#/d/${encodeURIComponent(b.day.id)}">${inner}</a></li>` : `<li class="${b.got ? 'got' : ''}">${inner}</li>`;
+}
+function preloadCovers() {
+  const pend = [...S.A.resorts.keys()].filter(k => !S.cover?.[k]);
+  if (!pend.length || S.coverPreload) return; S.coverPreload = true;
+  Promise.all(pend.map(k => loadCover(k).catch(() => {}))).then(() => { S.coverPreload = false; if (document.body.dataset.view === 'stats') rerender(); });
+}
 function viewStats() {
   const A = S.A;
   if (!S.days.length) { body.innerHTML = `<h1 class="hero">Estadísticas</h1><p class="lead">Aún no hay días guardados.</p>${dropzone()}`; mv.showGlobe([]); return; }
   const seasons = [...A.seasons.values()].sort((a, b) => a.key.localeCompare(b.key));
   const palette = ['#1D6FE0', '#D7263D', '#27A567', '#F2B705', '#7A4FD3', '#0F2740'];
   const R = A.rec, recRow = (label, val, r) => r ? `<a class="row" href="#/d/${encodeURIComponent(r.d.id)}"><span class="what"><b>${label}</b><i>${esc(r.d.resort)}, ${f.dateShort(r.d)}${r.extra ? ', bajada ' + r.extra.n : ''}</i></span><span class="num wide">${val}</span></a>` : '';
-  const bd = badges(S.days, A), top = [...A.lifts.values()].sort((a, b) => b.count - a.count).slice(0, 5);
+  const bd = allBadges(S.days, S), top = [...A.lifts.values()].sort((a, b) => b.count - a.count).slice(0, 5);
   const cmp = (label, get, fmt) => `<tr><th>${label}</th>${seasons.map(s => { const max = Math.max(...seasons.map(get)) || 1; return `<td><b>${fmt(get(s))}</b><i style="width:${100 * get(s) / max}%"></i></td>`; }).join('')}</tr>`;
   body.innerHTML = `<h1 class="hero">${f.int(A.vert)} m cuesta abajo</h1>
     <p class="lead">Eso son <b>${(A.vert / 104).toFixed(0)} Giraldas</b> una encima de otra, o <b>${(A.vert / 8849).toFixed(1).replace('.', ',')} veces</b> el Everest desde el nivel del mar.</p>
@@ -401,10 +416,10 @@ function viewStats() {
     ${segmentsHtml(S.segments, S.days)}
     <h2>Vídeo de la temporada</h2>
     <div class="videobox"><select id="vid-season" aria-label="Temporada del vídeo">${seasons.slice().reverse().map(s => `<option value="${s.key}">Temporada ${s.name}</option>`).join('')}${seasons.length > 1 ? '<option value="*">Todas las temporadas</option>' : ''}</select>
-      <button class="btn primary" data-act="video">Crear vídeo</button></div>
+      <button class="btn primary" data-act="video">Crear vídeo</button><button class="btn" data-act="story-season">Historia con foto</button></div>
     <p class="note">Un resumen animado de unos 20 segundos, en vertical, listo para mandar por WhatsApp.</p>
     <h2>Logros</h2><p class="note">${bd.filter(b => b.got).length} de ${bd.length} conseguidos.</p>
-    <ul class="badges">${bd.map(b => `<li class="${b.got ? 'got' : ''}"><b>${b.name}</b><span>${b.desc}</span></li>`).join('')}</ul>
+    ${[...new Set(bd.map(b => b.group))].map(g => `<h3 class="sub">${g}</h3><ul class="badges">${bd.filter(b => b.group === g).map(badgeLi).join('')}</ul>`).join('')}
     <h2>En qué se va un día de esquí</h2>${stack([{ label: 'Bajando', value: A.runTime, color: 'var(--red)' }, { label: 'En remontes', value: A.liftTime, color: 'var(--sun)' }, { label: 'Parado o en cola', value: A.rest, color: 'var(--mist)' }], f.dur)}
     <h2>A qué hora empiezas tus bajadas</h2>${bars(Array.from({ length: 10 }, (_, i) => ({ label: (i + 8) + 'h', value: A.hours[i + 8] })), { unit: 'bajadas', height: 100 })}
     <h2>A qué velocidad bajas</h2>${bars(BANDS.map((b, i) => ({ label: b + (i === BANDS.length - 1 ? '+' : ''), value: A.bands[i] / 60, color: SPEED_STOPS.reduce((c, [v, col]) => b + 5 >= v ? col : c, SPEED_STOPS[0][1]) })), { unit: 'min', height: 100 })}
@@ -414,6 +429,7 @@ function viewStats() {
     ${top.length ? `<h2>Tus remontes de siempre</h2><div class="list">${top.map(l => `<div class="row"><span class="disc lift">${l.count}</span><span class="what"><b>${esc(liftName(l.id))}</b><i>${esc(l.resort)}, ${f.int(l.vert)} m subidos, ${f.dur(l.time)} sentado</i></span></div>`).join('')}</div>` : ''}
     <h2>Hacia dónde bajas</h2><div class="split">${rose(A.rose)}<p class="note">Orientación de todas tus bajadas, por metros recorridos.</p></div>`;
   if (!mv.mode.startsWith('globe')) mv.showGlobe(globeResorts());
+  preloadCovers();
 }
 
 function viewAdd() {
@@ -501,6 +517,18 @@ const replay = {
   stop() { this.playing = false; cancelAnimationFrame(this.raf); document.body.classList.remove('playing'); },
 };
 
+function storyData(days, title, sub, file) {
+  const A = aggregate(days), runs = days.flatMap(d => dayStats(d).runs.map(r => ({ d, r }))), fastest = runs.reduce((b, x) => !b || x.r.top > b.r.top ? x : b, null);
+  const one = days.length === 1, d0 = days[0], s0 = one ? dayStats(d0) : null;
+  const lines = runs.filter(x => one || x.d.locationId === fastest.d.locationId).map(({ d, r }) => { const T = d.track, pts = []; for (let i = r.i0; i <= r.i1; i += 2) pts.push([T.lat[i], T.lon[i]]); return { pts, hot: r === fastest.r }; });
+  const stats = [
+    { key: 'km', v: f.km(A.dist), l: 'km' }, { key: 'vert', v: f.int(A.vert), l: 'm de desnivel' }, { key: 'top', v: String(Math.round(A.top * KMH)), l: 'km/h máx.' },
+    { key: 'runs', v: String(A.runs), l: 'bajadas' }, { key: 'peak', v: f.int(A.peak), l: 'm de cota' },
+    one ? { key: 'time', v: f.dur(s0.runTime).replace(' min', '′').replace(' h ', 'h '), l: 'bajando' } : { key: 'days', v: String(A.days), l: 'días' },
+    { key: 'turns', v: f.int(shapeOf(days).turns), l: 'giros' },
+  ];
+  return { title, sub, file, stats, lines, defaults: ['km', 'vert', 'top'] };
+}
 const makeVideo = (days, title) => recordVideo(days, title, { f, db, toast });
 
 /* ---------- acciones ---------- */
@@ -522,6 +550,8 @@ async function act(name, el) {
   }
   else if (cmd === 'video') { const k = $('#vid-season').value; makeVideo(k === '*' ? S.days : S.A.seasons.get(k).days, k === '*' ? 'Todas mis temporadas' : 'Temporada ' + S.A.seasons.get(k).name); }
   else if (cmd.startsWith('al-')) live.alertsAct(cmd, el);
+  else if (cmd === 'story') { const d = replay.d; openStory(storyData([d], d.resort, f.dateLong(d).replace(/^./, c => c.toUpperCase()), localDate(d).toISOString().slice(0, 10)), { toast }); }
+  else if (cmd === 'story-season') { const k = $('#vid-season').value, days = k === '*' ? S.days : S.A.seasons.get(k).days; openStory(storyData(days, k === '*' ? 'Mis temporadas' : 'Temporada ' + S.A.seasons.get(k).name, `${days.length} ${days.length === 1 ? 'día' : 'días'} en ${new Set(days.map(d => d.locationId)).size === 1 ? days[0].resort : new Set(days.map(d => d.locationId)).size + ' estaciones'}`, k === '*' ? 'todas' : k.replace('/', '-')), { toast }); }
   else if (cmd === 'cmp-go') location.hash = `#/cmp/${encodeURIComponent(arg)}/${encodeURIComponent($('#cmp-other').value)}`;
   else if (cmd === 'goal-add') {
     const t = parseFloat(String($('#g-target').value).replace(',', '.')); if (!(t > 0)) return toast('Pon un número mayor que cero.');

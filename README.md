@@ -14,6 +14,8 @@ PWA para ver el historial de esquí a partir de los ficheros `.slopes` que expor
 - Comparar dos días cara a cara, con las dos trazas en el mapa y las bajadas repetidas enfrentadas.
 - Curvas y pendiente: giros estimados por GPS y velocidad según la pendiente.
 - Cobertura: qué pistas de la estación has bajado y cuáles te faltan, según OpenStreetMap.
+- Historias para Instagram: tu foto con la traza y los datos encima, o una pegatina transparente.
+- 31 logros por grupos, con progreso y el día en que se consiguieron.
 - Los datos se guardan solo en el dispositivo (IndexedDB). «Añadir días» permite descargar una copia `.zip` y restaurarla.
 
 Sin compilación: HTML, CSS y JS tal cual. MapLibre GL y fflate van incluidos en `vendor/`.
