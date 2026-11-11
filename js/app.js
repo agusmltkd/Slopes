@@ -99,7 +99,7 @@ addEventListener('online', () => autoNames());
 
 /* ---------- piezas de interfaz ---------- */
 const stat = (v, l, cls = '') => `<div class="stat ${cls}${String(v).length > 6 ? ' long' : ''}"><b>${v}</b><span>${l}</span></div>`;
-const dropzone = () => `<button class="dropzone" data-act="pick"><strong>Añadir ficheros .slopes</strong><span>Tócalo para elegirlos, o arrástralos a la ventana. También vale un .zip con varios.</span></button>`;
+const dropzone = () => `<button class="dropzone" data-act="pick"><strong>Añadir ficheros .slopes</strong><span>Tócalo y elígelos en Archivos; puedes marcar varios a la vez. También vale un .zip con varios.</span></button>`;
 const dayRow = d => `<a class="row" href="#/d/${encodeURIComponent(d.id)}"><span class="when"><b>${localDate(d).getUTCDate()}</b>${localDate(d).toLocaleDateString('es-ES', { month: 'short', timeZone: 'UTC' })} ${String(localDate(d).getUTCFullYear()).slice(2)}</span>
   <span class="what"><b>${esc(d.resort)}</b><i>${d.runCount} bajadas, ${f.km(d.distance)} km, ${f.int(d.vertical)} m</i></span><span class="num">${Math.round(d.topSpeed * KMH)}<small>km/h</small></span></a>`;
 const speedLegend = () => `<div class="speedlegend"><span>0</span><i style="background:linear-gradient(90deg,${SPEED_STOPS.map(([v, c]) => `${c} ${v / 75 * 100}%`).join(',')})"></i><span>75+ km/h</span></div>`;
